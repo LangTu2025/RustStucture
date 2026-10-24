@@ -291,6 +291,52 @@ fn ibimport_xor_segments_and_base64_command() {
 }
 
 #[test]
+fn ibimport_accepts_go_boolish_values_and_plain_command_fallback() {
+    let mut bytes = b"IBImport ".to_vec();
+    let script = (0..8)
+        .map(|x| format!("setblock {x} 0 0 command_block []\n"))
+        .collect::<String>();
+    let commands = serde_json::json!([
+        {"posX":"~0","posY":"~0","posZ":"~0","CommandMessage":"say hello","Conditional":0},
+        {"posX":"~1","posY":"~0","posZ":"~0","CommandMessage":"c2F5IGhp","Conditional":1},
+        {"posX":"~2","posY":"~0","posZ":"~0","CommandMessage":"say false","Conditional":false},
+        {"posX":"~3","posY":"~0","posZ":"~0","CommandMessage":"say true","Conditional":true},
+        {"posX":"~4","posY":"~0","posZ":"~0","CommandMessage":"say zero","Conditional":"0"},
+        {"posX":"~5","posY":"~0","posZ":"~0","CommandMessage":"say one","Conditional":"1"},
+        {"posX":"~6","posY":"~0","posZ":"~0","CommandMessage":"say string false","Conditional":"false"},
+        {"posX":"~7","posY":"~0","posZ":"~0","CommandMessage":"say string true","Conditional":"true"}
+    ]);
+    for segment in [script.into_bytes(), serde_json::to_vec(&commands).unwrap()] {
+        let mut length = segment.len();
+        while length >= 128 {
+            bytes.push(length as u8 | 128);
+            length >>= 7;
+        }
+        bytes.push(length as u8);
+        bytes.push(0x35);
+        bytes.extend(segment.iter().map(|byte| byte ^ 0x35));
+    }
+
+    let data = binary::decode(FormatId::IBImport, &bytes).unwrap();
+    for (x, expected) in [false, true, false, true, false, true, false, true]
+        .into_iter()
+        .enumerate()
+    {
+        let block = &data.blocks[&Pos(x as i32, 0, 0)];
+        let nbt = block.nbt.as_ref().unwrap();
+        assert_eq!(nbt["conditionalMode"].as_i64(), Some(i64::from(expected)));
+    }
+    assert_eq!(
+        data.blocks[&Pos(0, 0, 0)].nbt.as_ref().unwrap()["Command"].as_str(),
+        Some("say hello")
+    );
+    assert_eq!(
+        data.blocks[&Pos(1, 0, 0)].nbt.as_ref().unwrap()["Command"].as_str(),
+        Some("say hi")
+    );
+}
+
+#[test]
 fn tibi_reads_external_raw_deflate_md5_xor_fixture() {
     // 通过 Python 标准库 hashlib/zlib 按 Go 测试定义独立生成。
     let bytes = hex::decode("6360646266616563e7e0e4e2e6e1e5db7b582b2e29bd6cb6d7f1856e6a553c9b2f2d5331e6b214fa61b1ecb8910c00").unwrap();

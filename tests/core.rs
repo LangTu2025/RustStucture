@@ -43,6 +43,86 @@ fn malformed_nbt_returns_error() {
 }
 
 #[test]
+fn tag_reader_read_tag_byte() {
+    let mut reader = nbt::Reader::new(&[0x42], Encoding::LittleEndian);
+    assert_eq!(reader.byte().unwrap(), 0x42);
+    assert_eq!(reader.pos, 1);
+}
+
+#[test]
+fn tag_reader_read_tag_string() {
+    let mut reader = nbt::Reader::new(&[2, 0, b'H', b'i'], Encoding::LittleEndian);
+    assert_eq!(reader.string().unwrap(), "Hi");
+    assert_eq!(reader.pos, 4);
+}
+
+#[test]
+fn tag_reader_read_tag_byte_array() {
+    let mut reader = nbt::Reader::new(&[3, 0, 0, 0, 1, 2, 3], Encoding::LittleEndian);
+    assert_eq!(reader.value(7, 0).unwrap(), Nbt::ByteArray(vec![1, 2, 3]));
+    assert_eq!(reader.pos, 7);
+}
+
+#[test]
+fn tag_reader_read_tag_byte_array_negative_length() {
+    let mut reader = nbt::Reader::new(&[255, 255, 255, 255], Encoding::LittleEndian);
+    assert!(reader.value(7, 0).is_err());
+}
+
+#[test]
+fn tag_reader_read_named_tag_and_compound_end() {
+    let input = [10, 0, 0, 1, 1, 0, b'x', 0x42, 0];
+    let (name, value) = nbt::decode(&input, Encoding::LittleEndian).unwrap();
+    assert_eq!(name, "");
+    assert_eq!(value, Nbt::Compound(BTreeMap::from([("x".into(), Nbt::Byte(0x42))])));
+}
+
+#[test]
+fn tag_reader_read_tag_value_byte() {
+    let mut reader = nbt::Reader::new(&[0x42], Encoding::LittleEndian);
+    assert_eq!(reader.value(1, 0).unwrap(), Nbt::Byte(0x42));
+}
+
+#[test]
+fn tag_writer_round_trip() {
+    let value = Nbt::Compound(BTreeMap::from([
+        ("ByteVal".into(), Nbt::Byte(0x7f)),
+        ("ShortVal".into(), Nbt::Short(12345)),
+        ("IntVal".into(), Nbt::Int(123456789)),
+        ("LongVal".into(), Nbt::Long(-9876543210)),
+        ("FloatVal".into(), Nbt::Float(1.5)),
+        ("DoubleVal".into(), Nbt::Double(2.25)),
+        ("StringVal".into(), Nbt::String("hello".into())),
+        ("ByteArrayVal".into(), Nbt::ByteArray(vec![1, 2, 3])),
+        ("IntArrayVal".into(), Nbt::IntArray(vec![4, 5])),
+        ("LongArrayVal".into(), Nbt::LongArray(vec![6, 7])),
+        ("ListVal".into(), Nbt::List(vec![Nbt::Int(1), Nbt::Int(2), Nbt::Int(3)])),
+        ("EmptyList".into(), Nbt::List(vec![])),
+        (
+            "CompoundVal".into(),
+            Nbt::Compound(BTreeMap::from([
+                ("NestedString".into(), Nbt::String("nested".into())),
+                ("NestedList".into(), Nbt::List(vec![Nbt::Float(1.0)])),
+            ])),
+        ),
+    ]));
+    let bytes = nbt::encode("Root", &value, Encoding::NetworkLittleEndian).unwrap();
+    assert_eq!(nbt::decode(&bytes, Encoding::NetworkLittleEndian).unwrap(), ("Root".into(), value));
+}
+
+#[test]
+fn tag_writer_rejects_mixed_type_list() {
+    let value = Nbt::List(vec![Nbt::Byte(1), Nbt::Int(2)]);
+    assert!(nbt::encode("", &value, Encoding::LittleEndian).is_err());
+}
+
+#[test]
+fn tag_reader_rejects_unknown_tag_type() {
+    let mut reader = nbt::Reader::new(&[], Encoding::LittleEndian);
+    assert!(reader.value(13, 0).is_err());
+}
+
+#[test]
 fn non_utf8_nbt_strings_keep_original_bytes() {
     let bytes = [8, 0, 0, 1, 0, 0xaa];
     let (name, value) = nbt::decode(&bytes, Encoding::LittleEndian).unwrap();

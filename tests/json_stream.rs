@@ -32,6 +32,24 @@ fn object_skips_unselected_nested_values() {
 }
 
 #[test]
+fn json_reader_read_values_maps_objects_arrays_booleans_null_and_strings() {
+    let input = br#"[{"a":1},["x",2],true,null,"str"]"#;
+    let mut values = Vec::new();
+    json_stream::visit_array::<_, Value, _>(input.as_slice(), |value| {
+        values.push(value);
+        Ok(())
+    })
+    .unwrap();
+
+    assert_eq!(values.len(), 5);
+    assert_eq!(values[0]["a"], 1);
+    assert_eq!(values[1], serde_json::json!(["x", 2]));
+    assert_eq!(values[2], Value::Bool(true));
+    assert_eq!(values[3], Value::Null);
+    assert_eq!(values[4], Value::String("str".into()));
+}
+
+#[test]
 fn skip_validates_syntax_and_rejects_trailing_input() {
     json_stream::skip_value(br#"{"x":[1,{"y":"\u4e2d"}]}"#.as_slice()).unwrap();
     assert!(json_stream::skip_value(b"[1,]".as_slice()).is_err());
