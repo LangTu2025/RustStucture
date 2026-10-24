@@ -166,7 +166,11 @@ impl<'a> Reader<'a> {
         Ok(s)
     }
     pub fn byte(&mut self) -> Result<u8> {
-        Ok(self.take(1)?[0])
+        let value = self.data.get(self.pos).copied();
+        self.pos += 1;
+        value.ok_or_else(|| {
+            Error::Io(std::io::Error::from(std::io::ErrorKind::UnexpectedEof))
+        })
     }
     pub fn varuint(&mut self, max: usize) -> Result<u64> {
         let mut v = 0;

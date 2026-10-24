@@ -50,6 +50,18 @@ fn tag_reader_read_tag_byte() {
 }
 
 #[test]
+fn tag_reader_read_tag_byte_eof_matches_go_reader() {
+    let mut reader = nbt::Reader::new(&[], Encoding::LittleEndian);
+    let error = reader.byte().unwrap_err();
+    assert!(matches!(
+        error,
+        rust_water_structure::Error::Io(ref error)
+            if error.kind() == std::io::ErrorKind::UnexpectedEof
+    ));
+    assert_eq!(reader.pos, 1);
+}
+
+#[test]
 fn tag_reader_read_tag_string() {
     let mut reader = nbt::Reader::new(&[2, 0, b'H', b'i'], Encoding::LittleEndian);
     assert_eq!(reader.string().unwrap(), "Hi");
