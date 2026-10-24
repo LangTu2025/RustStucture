@@ -280,6 +280,12 @@ impl<'a> Reader<'a> {
         }
         Ok((tag, self.string()?))
     }
+    pub fn read_tag_value(&mut self, tag: u8) -> Result<Option<Nbt>> {
+        if tag == 0 {
+            return Ok(None);
+        }
+        Ok(Some(self.value(tag, 0)?))
+    }
     pub fn value(&mut self, tag: u8, depth: usize) -> Result<Nbt> {
         if depth > 512 {
             return Err(Error::invalid("NBT 嵌套过深"));

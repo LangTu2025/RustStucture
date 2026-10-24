@@ -86,6 +86,19 @@ fn tag_reader_read_tag_rejects_unknown_type_before_name() {
 }
 
 #[test]
+fn tag_reader_read_tag_value_byte_end_and_unknown() {
+    let mut byte = nbt::Reader::new(&[0x42], Encoding::LittleEndian);
+    assert_eq!(byte.read_tag_value(1).unwrap(), Some(Nbt::Byte(0x42)));
+
+    let mut end = nbt::Reader::new(&[], Encoding::LittleEndian);
+    assert_eq!(end.read_tag_value(0).unwrap(), None);
+    assert_eq!(end.pos, 0);
+
+    let mut unknown = nbt::Reader::new(&[], Encoding::LittleEndian);
+    assert!(unknown.read_tag_value(13).is_err());
+}
+
+#[test]
 fn tag_reader_read_tag_string() {
     let mut reader = nbt::Reader::new(&[2, 0, b'H', b'i'], Encoding::LittleEndian);
     assert_eq!(reader.string().unwrap(), "Hi");
