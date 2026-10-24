@@ -1,0 +1,42 @@
+[
+  {
+    "file": "bdx_runtimeIds_117.json",
+    "bytes": 183969,
+    "sha256": "cec516c2878edc103c7624b6298e59461bfbe459b491e83c0a9c064fa3bc3409"
+  },
+  {
+    "file": "bedrock_java_to_translate.br",
+    "bytes": 165705,
+    "sha256": "9b94157f745aa348d7337edfefb67b6e6455ac476a5f82363476f9ec59ce9686"
+  },
+  {
+    "file": "bedrock_to_java_translate.br",
+    "bytes": 331654,
+    "sha256": "79de9754b678b0063cd56daa23ea8c0918dcc7ceafcdb79addaf26b95e92f608"
+  },
+  {
+    "file": "block_states.bin",
+    "bytes": 297385,
+    "sha256": "08b8b9b86275f20ded85ca1acef66a5b27c54f1f4c95b7218621f581e021e545"
+  },
+  {
+    "file": "colors.json",
+    "bytes": 19627,
+    "sha256": "626c30e47bb459305b55af4c90409490ad004c1b4908e4a3956a951e8fe6ffd5"
+  },
+  {
+    "file": "nemc.br",
+    "bytes": 57149,
+    "sha256": "9f52cce74fe449e7d1a73638f6982f1078c77e850a6a70e020389f8159cc7194"
+  },
+  {
+    "file": "schematic_names.json",
+    "bytes": 3892,
+    "sha256": "4fd97a02de09dd38f53c377000ed5e82b8bd9bd1fde0d25e0d95e40ee5b96605"
+  },
+  {
+    "file": "specific_legacy_value_to_translate.br",
+    "bytes": 11348,
+    "sha256": "0e2200abcbd4688d83bc28969064c4c15c1d1715f17cf6813903a0d1f9dd9aff"
+  }
+]

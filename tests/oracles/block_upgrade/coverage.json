@@ -1,0 +1,20 @@
+{
+  "add": 32,
+  "add_existing": 32,
+  "remove": 141,
+  "rename_property": 186,
+  "value_remap": 980,
+  "strict_integer_type": 865,
+  "future_version": 35,
+  "state_remap": 34,
+  "state_remap_mismatch": 34,
+  "rename_id": 35,
+  "flatten_string": 46,
+  "flatten_wrong_type": 51,
+  "flatten_byte": 4,
+  "flatten_int": 1,
+  "version_boundary_-1": 2441,
+  "version_boundary_1": 2441,
+  "flatten_byte_unsigned": 20,
+  "flatten_integer": 5
+}

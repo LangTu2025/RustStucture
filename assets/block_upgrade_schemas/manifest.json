@@ -1,0 +1,194 @@
+{
+  "module": "github.com/Happy2018new/worldupgrader",
+  "version": "v1.4.0",
+  "commit": "dd5e48d4b058f1c71647629866a27fb43bb1c281",
+  "module_sum": "h1:RUVMkKsqzEfoMLZzavB00iDN7UhcK9iqda5ca5tu3yg=",
+  "schema_source": "https://github.com/pmmp/BedrockBlockUpgradeSchema",
+  "files": [
+    {
+      "file": "0001_1.9.0_to_1.10.0.json",
+      "bytes": 52603,
+      "sha256": "7f013cff8cfb685dc91445d70ba11772bf112446b8a9bedca4bd9bf06a0d88c3"
+    },
+    {
+      "file": "0011_1.10.0_to_1.12.0.json",
+      "bytes": 2431,
+      "sha256": "15a741df0a6a10991694decd4a4c5cba6cf1dce7366c224bc461db5b4c26f03a"
+    },
+    {
+      "file": "0021_1.12.0_to_1.13.0.json",
+      "bytes": 24079,
+      "sha256": "a840e766bec0c891477434f090b8c06963b9f900ea7a288f1da3c89204a3b335"
+    },
+    {
+      "file": "0031_1.13.0_to_1.14.0.json",
+      "bytes": 213,
+      "sha256": "a46ed2ac79ccc6cfbf61b9816a8b5a59cfd67eeb4335780eb3e460d58e2147c0"
+    },
+    {
+      "file": "0041_1.14.0_to_1.16.0.57_beta.json",
+      "bytes": 736,
+      "sha256": "1285f02d53afcb8b6b39761dcf84068f3645a675b9f27f41fcc8a470739e9545"
+    },
+    {
+      "file": "0051_1.16.0.57_beta_to_1.16.0.59_beta.json",
+      "bytes": 707,
+      "sha256": "e683768265c40f5fad4dc06a7caa439a10b7b9d6dbd2864831f4e512ac891a9f"
+    },
+    {
+      "file": "0061_1.16.0.59_beta_to_1.16.0.68_beta.json",
+      "bytes": 1693,
+      "sha256": "a0324d8519d629679adfffc506e3b24f6c48c357dfd11b2cc93a305e2fa4eae5"
+    },
+    {
+      "file": "0071_1.16.0_to_1.16.100.json",
+      "bytes": 1475,
+      "sha256": "9830fb2cf3eaaa6a42d24645eaeb14f1c87dbea4d05c1ab5caaf394dbc6e5a92"
+    },
+    {
+      "file": "0081_1.16.200_to_1.16.210.json",
+      "bytes": 472,
+      "sha256": "5b7d17eb8b24fe4c575421703339efa6032b90685460828c75628599175d9038"
+    },
+    {
+      "file": "0091_1.17.10_to_1.17.30.json",
+      "bytes": 385,
+      "sha256": "1fafabcc33cebabffffbb92840116adb01a16a54c3e39dc884c658b3f2fbb00a"
+    },
+    {
+      "file": "0101_1.17.30_to_1.17.40.json",
+      "bytes": 256,
+      "sha256": "5bbf41f9849565f8adf7f0da78539a0f5b4910dbc8c5476446c4dcfc1f348daf"
+    },
+    {
+      "file": "0111_1.18.0_to_1.18.10.json",
+      "bytes": 9015,
+      "sha256": "cb41d9f2a8f3720016dd30619d2d09cf71aae4baa36333e3165a720f65e502b0"
+    },
+    {
+      "file": "0121_1.18.10_to_1.18.20.27_beta.json",
+      "bytes": 600,
+      "sha256": "16f317001119d1573c27b33dcd3934a53bc7761b99f8c8bcc44e752863b8ae72"
+    },
+    {
+      "file": "0131_1.18.20.27_beta_to_1.18.30.json",
+      "bytes": 751,
+      "sha256": "7dc398804a060666e9af0221c654acac61888e372d2918a82928798b6b011520"
+    },
+    {
+      "file": "0141_1.18.30_to_1.19.0.34_beta.json",
+      "bytes": 1573,
+      "sha256": "6fcf03e78b89aadb6255a870898f440800a09a3a94d62a16876a339f9c46ba1d"
+    },
+    {
+      "file": "0151_1.19.0.34_beta_to_1.19.20.json",
+      "bytes": 271,
+      "sha256": "042bb1e09f7ad219c7602f726e3d7f395a36ad87305f189a92f4abe8cf5cdaa3"
+    },
+    {
+      "file": "0161_1.19.50_to_1.19.60.26_beta.json",
+      "bytes": 233,
+      "sha256": "132ceeb184acfd9fc568c1b5e2d614d4029399ea78c5507187b45d1945052d31"
+    },
+    {
+      "file": "0171_1.19.60_to_1.19.70.26_beta.json",
+      "bytes": 387,
+      "sha256": "2073778401633cfa6ec37ae504064020716828758e75c76b1d640a224e4b0a88"
+    },
+    {
+      "file": "0181_1.19.70_to_1.19.80.24_beta.json",
+      "bytes": 606,
+      "sha256": "cdee58708536eb80a14d1ba07ed34bc42bec9e4b77bee0c831cb61377b7cf204"
+    },
+    {
+      "file": "0191_1.19.80.24_beta_to_1.20.0.23_beta.json",
+      "bytes": 4186,
+      "sha256": "9afa0ba168fd40ae06a9e3ecd48de599fddb592ec5eb990318afcfd9ec78ec9e"
+    },
+    {
+      "file": "0201_1.20.0.23_beta_to_1.20.10.24_beta.json",
+      "bytes": 2098,
+      "sha256": "f19caa6975c44f901d7810efca0c7bb305b3ad97821ef6b6c77644264370b2be"
+    },
+    {
+      "file": "0211_1.20.10.24_beta_to_1.20.20.23_beta.json",
+      "bytes": 14819,
+      "sha256": "78262c25b86f3b73d5b54c9da50423207f56e7b02eb82fa06fdd10c67c4620a1"
+    },
+    {
+      "file": "0221_1.20.20.23_beta_to_1.20.30.22_beta.json",
+      "bytes": 6471,
+      "sha256": "70ffe75440df3a5e8ed3c7c4162e8c94c1366b3fbad0a4f45d1b4e0d5dcc08ab"
+    },
+    {
+      "file": "0231_1.20.30.22_beta_to_1.20.40.24_beta.json",
+      "bytes": 2205,
+      "sha256": "de833588f8cc2268316981633e8abf40a55b2d4144c1d8219186b05b879f3db8"
+    },
+    {
+      "file": "0241_1.20.40.24_beta_to_1.20.50.23_beta.json",
+      "bytes": 666,
+      "sha256": "957dda5efd1fe7ef37255883fbb12b11a1e78c5f20884dd75f2d3412668aa8ba"
+    },
+    {
+      "file": "0251_1.20.50.23_beta_to_1.20.60.26_beta.json",
+      "bytes": 691,
+      "sha256": "0f00ea98253bff489960a5d6f44dfc8e0cda294f789e38f0311f699279727907"
+    },
+    {
+      "file": "0261_1.20.60.26_beta_to_1.20.70.24_beta.json",
+      "bytes": 1919,
+      "sha256": "649e1580f51d6c77e4fe9b379bdc4ce9cbc4469f2382d5ee61258457667a3df2"
+    },
+    {
+      "file": "0271_1.20.70.24_beta_to_1.20.80.24_beta.json",
+      "bytes": 1699,
+      "sha256": "20e67afa7036cd75b7f65dfb57d45f404f36308471602f80eba6b2ba24914424"
+    },
+    {
+      "file": "0281_1.20.80.24_beta_to_1.21.0.25_beta.json",
+      "bytes": 2813,
+      "sha256": "5f616330832510b8935c3b29f9cbdff807d33dc8dcdf86f82689173bbcb8ef83"
+    },
+    {
+      "file": "0291_1.21.0.3_to_1.21.1.0.json",
+      "bytes": 503,
+      "sha256": "aadd87e251b8d272e9f2d76a3d3cadeb16b66d6d790d53a98c70dc410e5c33e8"
+    },
+    {
+      "file": "0301_1.21.0.25_beta_to_1.21.20.24_beta.json",
+      "bytes": 9139,
+      "sha256": "9445a3610f457d93a513ec5fae7e71b8c1a260b937189e9b7f9cb6b68cdeb174"
+    },
+    {
+      "file": "0311_1.21.20.24_beta_to_1.21.30.24_beta.json",
+      "bytes": 2467,
+      "sha256": "4bfe0dd453d129c72c0c6f0f39f2a604db694b7d53dcaeac69e9e8088e76773b"
+    },
+    {
+      "file": "0321_1.21.30.24_beta_to_1.21.40.25_beta.json",
+      "bytes": 2440,
+      "sha256": "a82f80b7e37d043eef552859b83032fd25ecc4f99d37dd97836db2ddf57b2694"
+    },
+    {
+      "file": "0331_1.21.50.29_beta_to_1.21.60.28_beta.json",
+      "bytes": 9130,
+      "sha256": "a21413011a8ed8b94937f879fbca79ea3611e12b7e4617ea98e36690db0a427e"
+    },
+    {
+      "file": "0341_1.21.100.23_beta_to_1.21.110.26_beta.json",
+      "bytes": 339,
+      "sha256": "9e50857ce0d84f61b5645da532b1a4f1d7df55ab1c249366b0f2188c3826e690"
+    }
+  ],
+  "licenses": [
+    {
+      "file": "LICENSE-worldupgrader-MIT",
+      "sha256": "9d2f74cc76a6df92887b88db207f9898b31cf6480a8a231b09f4fd2cb1c6b2a7"
+    },
+    {
+      "file": "LICENSE-schema-CC0",
+      "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499"
+    }
+  ]
+}

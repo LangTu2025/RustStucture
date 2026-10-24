@@ -1,0 +1,39 @@
+[package]
+name = "rust-water-structure"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+description = "Minecraft structure codecs compatible with WaterStructure"
+
+[lib]
+name = "rust_water_structure"
+
+[[bin]]
+name = "rust-water-structure"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rmp-serde = "1"
+thiserror = "2"
+flate2 = "1"
+brotli = "8"
+base64 = "0.22"
+md-5 = "0.10"
+sha2 = { version = "0.10", features = ["oid"] }
+hex = "0.4"
+rsa = { version = "0.9", features = ["sha2"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+clap = { version = "4", features = ["derive"] }
+tempfile = "3"
+bedrock-leveldb = { version = "=0.3.1", default-features = false, features = ["zlib", "snappy"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+[patch.crates-io]
+bedrock-leveldb = { path = "vendor/bedrock-leveldb" }
+
