@@ -92,6 +92,42 @@ fn tag_reader_read_tag_int16_truncation_consumes_available_bytes() {
 }
 
 #[test]
+fn tag_reader_read_tag_int32_uses_all_encoding_layouts() {
+    for (encoding, bytes) in [
+        (Encoding::LittleEndian, vec![0xd4, 0xfe, 0xff, 0xff]),
+        (Encoding::BigEndian, vec![0xff, 0xff, 0xfe, 0xd4]),
+        (Encoding::NetworkLittleEndian, vec![0xd7, 0x04]),
+        (Encoding::NetworkBigEndian, vec![0xff, 0xff, 0xfe, 0xd4]),
+    ] {
+        let mut reader = nbt::Reader::new(&bytes, encoding);
+        assert_eq!(reader.int().unwrap(), -300, "{encoding:?}");
+        assert_eq!(reader.pos, bytes.len());
+    }
+}
+
+#[test]
+fn tag_reader_read_tag_int32_fixed_width_truncation_consumes_available_bytes() {
+    for encoding in [Encoding::LittleEndian, Encoding::BigEndian] {
+        let mut reader = nbt::Reader::new(&[1, 2, 3], encoding);
+        let error = reader.int().unwrap_err();
+        assert!(matches!(
+            error,
+            rust_water_structure::Error::Io(ref error)
+                if error.kind() == std::io::ErrorKind::UnexpectedEof
+        ));
+        assert_eq!(reader.pos, 3);
+    }
+}
+
+#[test]
+fn tag_reader_read_tag_int32_network_fifth_byte_matches_go_uint32_truncation() {
+    let bytes = [0x80, 0x80, 0x80, 0x80, 0x7f];
+    let mut reader = nbt::Reader::new(&bytes, Encoding::NetworkLittleEndian);
+    assert_eq!(reader.int().unwrap(), 0x7800_0000);
+    assert_eq!(reader.pos, 5);
+}
+
+#[test]
 fn tag_reader_read_tag_and_end() {
     let mut reader = nbt::Reader::new(&[1, 4, 0, b't', b'e', b's', b't'], Encoding::LittleEndian);
     assert_eq!(reader.read_tag().unwrap(), (1, "test".into()));

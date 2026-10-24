@@ -207,10 +207,25 @@ impl<'a> Reader<'a> {
     }
     pub fn int(&mut self) -> Result<i32> {
         if self.encoding.net() {
-            let v = u32::try_from(self.varuint(5)?).map_err(|_| Error::invalid("varint32 溢出"))?;
-            Ok(((v >> 1) as i32) ^ -((v & 1) as i32))
+            let mut value = 0u32;
+            for index in 0..5 {
+                let byte = self.byte()?;
+                value |= u32::from(byte & 0x7f) << (index * 7);
+                if byte & 0x80 == 0 {
+                    let decoded = (value >> 1) as i32;
+                    return Ok(if value & 1 != 0 { !decoded } else { decoded });
+                }
+            }
+            Err(Error::invalid("varint 无效"))
         } else {
             let le = self.encoding.le();
+            let available = self.data.len().saturating_sub(self.pos);
+            if available < 4 {
+                self.pos += available;
+                return Err(Error::Io(std::io::Error::from(
+                    std::io::ErrorKind::UnexpectedEof,
+                )));
+            }
             let b = self.take(4)?.try_into().unwrap();
             Ok(if le {
                 i32::from_le_bytes(b)
