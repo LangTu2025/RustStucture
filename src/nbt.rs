@@ -8,6 +8,7 @@ pub type Compound = BTreeMap<String, Nbt>;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "value")]
 pub enum Nbt {
+    End,
     Byte(i8),
     Short(i16),
     Int(i32),
@@ -25,6 +26,7 @@ pub enum Nbt {
 impl Nbt {
     pub fn tag(&self) -> u8 {
         match self {
+            Self::End => 0,
             Self::Byte(_) => 1,
             Self::Short(_) => 2,
             Self::Int(_) => 3,
@@ -72,6 +74,7 @@ impl Nbt {
     }
     pub fn scalar_string(&self) -> String {
         match self {
+            Self::End => "END".into(),
             Self::String(v) => v.clone(),
             Self::RawString(v) => String::from_utf8_lossy(v).into_owned(),
             Self::Byte(v) => v.to_string(),
@@ -107,6 +110,7 @@ impl Nbt {
     pub fn to_json(&self) -> serde_json::Value {
         use serde_json::{Value, json};
         match self {
+            Self::End => Value::Null,
             Self::Byte(v) => json!(v),
             Self::Short(v) => json!(v),
             Self::Int(v) => json!(v),
@@ -315,17 +319,6 @@ impl<'a> Reader<'a> {
         String::from_utf8(self.string_bytes()?)
             .map_err(|_| Error::invalid("NBT 标签名称 UTF-8 无效"))
     }
-    fn length(&mut self) -> Result<usize> {
-        let n = self.int()?;
-        if n < 0 {
-            return Err(Error::invalid("NBT 数组长度为负数"));
-        }
-        let n = n as usize;
-        if n > self.data.len().saturating_sub(self.pos) {
-            return Err(Error::invalid("NBT 数组越界"));
-        }
-        Ok(n)
-    }
     pub fn byte_array(&mut self) -> Result<Vec<u8>> {
         let n = self.int()?;
         if n < 0 {
@@ -377,6 +370,28 @@ impl<'a> Reader<'a> {
         }
         Ok(values)
     }
+    pub fn list(&mut self) -> Result<Vec<Nbt>> {
+        self.list_at_depth(0)
+    }
+    fn list_at_depth(&mut self, depth: usize) -> Result<Vec<Nbt>> {
+        let element_tag = self.byte()?;
+        if element_tag > 12 {
+            return Err(Error::invalid(format!("无效 NBT 列表元素标签 {element_tag}")));
+        }
+        let count = self.int()?;
+        if count < 0 {
+            return Err(Error::invalid("NBT 列表长度为负数"));
+        }
+        let mut values = Vec::with_capacity((count as usize).min(4096));
+        for _ in 0..count {
+            if element_tag == 0 {
+                values.push(Nbt::End);
+            } else {
+                values.push(self.value(element_tag, depth + 1)?);
+            }
+        }
+        Ok(values)
+    }
     pub fn value(&mut self, tag: u8, depth: usize) -> Result<Nbt> {
         if depth > 512 {
             return Err(Error::invalid("NBT 嵌套过深"));
@@ -396,15 +411,7 @@ impl<'a> Reader<'a> {
                     Err(error) => Nbt::RawString(error.into_bytes()),
                 }
             }
-            9 => {
-                let t = self.byte()?;
-                let n = self.length()?;
-                let mut v = Vec::with_capacity(n.min(4096));
-                for _ in 0..n {
-                    v.push(self.value(t, depth + 1)?);
-                }
-                Nbt::List(v)
-            }
+            9 => Nbt::List(self.list_at_depth(depth)?),
             10 => {
                 let mut m = BTreeMap::new();
                 loop {
@@ -503,6 +510,7 @@ impl Writer {
     }
     pub fn value(&mut self, v: &Nbt) -> Result<()> {
         match v {
+            Nbt::End => {}
             Nbt::Byte(n) => self.data.push(*n as u8),
             Nbt::Short(n) => self.short(*n),
             Nbt::Int(n) => self.int(*n),
@@ -643,6 +651,7 @@ pub fn encode_compound_with_position(
 
 pub fn to_snbt(v: &Nbt) -> String {
     match v {
+        Nbt::End => "END".into(),
         Nbt::Byte(v) => format!("{v}b"),
         Nbt::Short(v) => format!("{v}s"),
         Nbt::Int(v) => v.to_string(),

@@ -302,6 +302,50 @@ fn tag_reader_read_tag_int64_array_negative_length_panics_like_go() {
 }
 
 #[test]
+fn tag_reader_read_tag_list_decodes_values_end_items_and_nested_lists() {
+    let mut ints = nbt::Reader::new(&[3, 2, 0, 0, 0, 1, 0, 0, 0, 0xfe, 0xff, 0xff, 0xff], Encoding::LittleEndian);
+    assert_eq!(ints.list().unwrap(), [Nbt::Int(1), Nbt::Int(-2)]);
+    assert_eq!(ints.pos, 13);
+
+    let mut ends = nbt::Reader::new(&[0, 2, 0, 0, 0, 0xaa], Encoding::LittleEndian);
+    assert_eq!(ends.list().unwrap(), [Nbt::End, Nbt::End]);
+    assert_eq!(ends.pos, 5);
+    assert_eq!(ends.byte().unwrap(), 0xaa);
+
+    let mut nested = nbt::Reader::new(&[9, 1, 0, 0, 0, 1, 1, 0, 0, 0, 9], Encoding::LittleEndian);
+    assert_eq!(nested.list().unwrap(), [Nbt::List(vec![Nbt::Byte(9)])]);
+}
+
+#[test]
+fn tag_reader_read_tag_list_checks_type_before_count_and_handles_empty() {
+    let mut invalid = nbt::Reader::new(&[13, 0, 0, 0, 0], Encoding::LittleEndian);
+    assert!(invalid.list().is_err());
+    assert_eq!(invalid.pos, 1);
+
+    let mut empty = nbt::Reader::new(&[3, 0, 0, 0, 0], Encoding::LittleEndian);
+    assert!(empty.list().unwrap().is_empty());
+    assert_eq!(empty.pos, 5);
+}
+
+#[test]
+fn tag_reader_read_tag_list_negative_count_errors_and_truncation_consumes() {
+    let mut negative = nbt::Reader::new(&[1, 0xff, 0xff, 0xff, 0xff], Encoding::LittleEndian);
+    assert!(negative.list().is_err());
+    assert_eq!(negative.pos, 5);
+
+    let mut truncated = nbt::Reader::new(&[1, 2, 0, 0, 0, 0x42], Encoding::LittleEndian);
+    assert!(truncated.list().is_err());
+    assert_eq!(truncated.pos, 7);
+}
+
+#[test]
+fn tag_reader_read_tag_list_network_encoding() {
+    let mut reader = nbt::Reader::new(&[3, 4, 2, 3], Encoding::NetworkLittleEndian);
+    assert_eq!(reader.list().unwrap(), [Nbt::Int(1), Nbt::Int(-2)]);
+    assert_eq!(reader.pos, 4);
+}
+
+#[test]
 fn tag_reader_read_tag_and_end() {
     let mut reader = nbt::Reader::new(&[1, 4, 0, b't', b'e', b's', b't'], Encoding::LittleEndian);
     assert_eq!(reader.read_tag().unwrap(), (1, "test".into()));
