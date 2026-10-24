@@ -263,6 +263,22 @@ impl<'a> Reader<'a> {
             })
         }
     }
+    pub fn float(&mut self) -> Result<f32> {
+        let le = self.encoding.le();
+        let available = self.data.len().saturating_sub(self.pos);
+        if available < 4 {
+            self.pos += available;
+            return Err(Error::Io(std::io::Error::from(
+                std::io::ErrorKind::UnexpectedEof,
+            )));
+        }
+        let b = self.take(4)?.try_into().unwrap();
+        Ok(if le {
+            f32::from_le_bytes(b)
+        } else {
+            f32::from_be_bytes(b)
+        })
+    }
     fn string_bytes(&mut self) -> Result<Vec<u8>> {
         let n = if self.encoding.net() {
             usize::try_from(self.varuint(5)?).map_err(|_| Error::invalid("字符串过长"))?
@@ -332,15 +348,7 @@ impl<'a> Reader<'a> {
             2 => Nbt::Short(self.short()?),
             3 => Nbt::Int(self.int()?),
             4 => Nbt::Long(self.long()?),
-            5 => {
-                let le = self.encoding.le();
-                let b = self.take(4)?.try_into().unwrap();
-                Nbt::Float(if le {
-                    f32::from_le_bytes(b)
-                } else {
-                    f32::from_be_bytes(b)
-                })
-            }
+            5 => Nbt::Float(self.float()?),
             6 => {
                 let le = self.encoding.le();
                 let b = self.take(8)?.try_into().unwrap();
