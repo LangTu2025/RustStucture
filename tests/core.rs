@@ -199,6 +199,38 @@ fn tag_reader_read_tag_float32_truncation_consumes_available_bytes() {
 }
 
 #[test]
+fn tag_reader_read_tag_float64_preserves_encoding_and_bit_patterns() {
+    for (encoding, bytes) in [
+        (
+            Encoding::LittleEndian,
+            vec![0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf8, 0x7f],
+        ),
+        (
+            Encoding::BigEndian,
+            vec![0x7f, 0xf8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+        ),
+    ] {
+        let mut reader = nbt::Reader::new(&bytes, encoding);
+        let value = reader.double().unwrap();
+        assert!(value.is_nan(), "{encoding:?}");
+        assert_eq!(value.to_bits(), 0x7ff8_0000_0000_0000, "{encoding:?}");
+        assert_eq!(reader.pos, 8);
+    }
+}
+
+#[test]
+fn tag_reader_read_tag_float64_truncation_consumes_available_bytes() {
+    let mut reader = nbt::Reader::new(&[1, 2, 3, 4, 5, 6, 7], Encoding::LittleEndian);
+    let error = reader.double().unwrap_err();
+    assert!(matches!(
+        error,
+        rust_water_structure::Error::Io(ref error)
+            if error.kind() == std::io::ErrorKind::UnexpectedEof
+    ));
+    assert_eq!(reader.pos, 7);
+}
+
+#[test]
 fn tag_reader_read_tag_and_end() {
     let mut reader = nbt::Reader::new(&[1, 4, 0, b't', b'e', b's', b't'], Encoding::LittleEndian);
     assert_eq!(reader.read_tag().unwrap(), (1, "test".into()));

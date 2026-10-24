@@ -279,6 +279,22 @@ impl<'a> Reader<'a> {
             f32::from_be_bytes(b)
         })
     }
+    pub fn double(&mut self) -> Result<f64> {
+        let le = self.encoding.le();
+        let available = self.data.len().saturating_sub(self.pos);
+        if available < 8 {
+            self.pos += available;
+            return Err(Error::Io(std::io::Error::from(
+                std::io::ErrorKind::UnexpectedEof,
+            )));
+        }
+        let b = self.take(8)?.try_into().unwrap();
+        Ok(if le {
+            f64::from_le_bytes(b)
+        } else {
+            f64::from_be_bytes(b)
+        })
+    }
     fn string_bytes(&mut self) -> Result<Vec<u8>> {
         let n = if self.encoding.net() {
             usize::try_from(self.varuint(5)?).map_err(|_| Error::invalid("字符串过长"))?
@@ -349,15 +365,7 @@ impl<'a> Reader<'a> {
             3 => Nbt::Int(self.int()?),
             4 => Nbt::Long(self.long()?),
             5 => Nbt::Float(self.float()?),
-            6 => {
-                let le = self.encoding.le();
-                let b = self.take(8)?.try_into().unwrap();
-                Nbt::Double(if le {
-                    f64::from_le_bytes(b)
-                } else {
-                    f64::from_be_bytes(b)
-                })
-            }
+            6 => Nbt::Double(self.double()?),
             7 => Nbt::ByteArray(self.byte_array()?.into_iter().map(|b| b as i8).collect()),
             8 => {
                 let bytes = self.string_bytes()?;
