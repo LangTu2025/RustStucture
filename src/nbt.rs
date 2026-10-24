@@ -5,6 +5,7 @@ use std::{
     io::{Cursor, Read},
 };
 pub type Compound = BTreeMap<String, Nbt>;
+pub type RawCompound = BTreeMap<Vec<u8>, Nbt>;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "value")]
 pub enum Nbt {
@@ -20,6 +21,7 @@ pub enum Nbt {
     RawString(Vec<u8>),
     List(Vec<Nbt>),
     Compound(Compound),
+    RawCompound(RawCompound),
     IntArray(Vec<i32>),
     LongArray(Vec<i64>),
 }
@@ -38,6 +40,7 @@ impl Nbt {
             Self::RawString(_) => 8,
             Self::List(_) => 9,
             Self::Compound(_) => 10,
+            Self::RawCompound(_) => 10,
             Self::IntArray(_) => 11,
             Self::LongArray(_) => 12,
         }
@@ -61,6 +64,13 @@ impl Nbt {
     pub fn as_compound(&self) -> Option<&Compound> {
         if let Self::Compound(v) = self {
             Some(v)
+        } else {
+            None
+        }
+    }
+    pub fn as_raw_compound(&self) -> Option<&RawCompound> {
+        if let Self::RawCompound(value) = self {
+            Some(value)
         } else {
             None
         }
@@ -126,6 +136,11 @@ impl Nbt {
             Self::Compound(v) => {
                 Value::Object(v.iter().map(|(k, v)| (k.clone(), v.to_json())).collect())
             }
+            Self::RawCompound(v) => Value::Object(
+                v.iter()
+                    .map(|(k, v)| (String::from_utf8_lossy(k).into_owned(), v.to_json()))
+                    .collect(),
+            ),
         }
     }
 }
@@ -308,6 +323,13 @@ impl<'a> Reader<'a> {
         if self.encoding.net() && n > i16::MAX as usize {
             return Err(Error::invalid("字符串过长"));
         }
+        let available = self.data.len().saturating_sub(self.pos);
+        if n > available {
+            self.pos += available;
+            return Err(Error::Io(std::io::Error::from(
+                std::io::ErrorKind::UnexpectedEof,
+            )));
+        }
         Ok(self.take(n)?.to_vec())
     }
 
@@ -333,14 +355,20 @@ impl<'a> Reader<'a> {
         Ok(self.take(n)?.to_vec())
     }
     pub fn read_tag(&mut self) -> Result<(u8, String)> {
+        let (tag, bytes) = self.read_tag_bytes()?;
+        let name = String::from_utf8(bytes)
+            .map_err(|_| Error::invalid("NBT 标签名称 UTF-8 无效"))?;
+        Ok((tag, name))
+    }
+    pub fn read_tag_bytes(&mut self) -> Result<(u8, Vec<u8>)> {
         let tag = self.tag_type()?;
         if tag > 12 {
             return Err(Error::invalid(format!("无效 NBT 标签 {tag}")));
         }
         if tag == 0 {
-            return Ok((tag, String::new()));
+            return Ok((tag, Vec::new()));
         }
-        Ok((tag, self.string()?))
+        Ok((tag, self.string_bytes()?))
     }
     pub fn read_tag_value(&mut self, tag: u8) -> Result<Option<Nbt>> {
         if tag == 0 {
@@ -392,6 +420,36 @@ impl<'a> Reader<'a> {
         }
         Ok(values)
     }
+    pub fn compound(&mut self) -> Result<Nbt> {
+        self.compound_at_depth(0, false)
+    }
+    fn compound_at_depth(
+        &mut self,
+        depth: usize,
+        enforce_depth_limit: bool,
+    ) -> Result<Nbt> {
+        let mut values = RawCompound::new();
+        let mut all_names_utf8 = true;
+        loop {
+            let (tag, name) = self.read_tag_bytes()?;
+            if tag == 0 {
+                break;
+            }
+            all_names_utf8 &= std::str::from_utf8(&name).is_ok();
+            let value = self.value_inner(tag, depth + 1, enforce_depth_limit)?;
+            values.insert(name, value);
+        }
+        if all_names_utf8 {
+            Ok(Nbt::Compound(
+                values
+                    .into_iter()
+                    .map(|(key, value)| (String::from_utf8(key).unwrap(), value))
+                    .collect(),
+            ))
+        } else {
+            Ok(Nbt::RawCompound(values))
+        }
+    }
     pub fn value(&mut self, tag: u8, depth: usize) -> Result<Nbt> {
         self.value_inner(tag, depth, false)
     }
@@ -415,21 +473,7 @@ impl<'a> Reader<'a> {
                 }
             }
             9 => Nbt::List(self.list_at_depth(depth, enforce_depth_limit)?),
-            10 => {
-                let mut m = BTreeMap::new();
-                loop {
-                    let t = self.byte()?;
-                    if t == 0 {
-                        break;
-                    }
-                    let name = self.string()?;
-                    m.insert(
-                        name,
-                        self.value_inner(t, depth + 1, enforce_depth_limit)?,
-                    );
-                }
-                Nbt::Compound(m)
-            }
+            10 => self.compound_at_depth(depth, enforce_depth_limit)?,
             11 => {
                 Nbt::IntArray(self.int_array()?)
             }
@@ -514,6 +558,18 @@ impl Writer {
         self.data.extend_from_slice(s.as_bytes());
         Ok(())
     }
+    fn string_bytes(&mut self, bytes: &[u8]) -> Result<()> {
+        if bytes.len() > u16::MAX as usize {
+            return Err(Error::invalid("NBT 字符串过长"));
+        }
+        if self.encoding.net() {
+            self.varuint(bytes.len() as u64);
+        } else {
+            self.short(bytes.len() as i16);
+        }
+        self.data.extend_from_slice(bytes);
+        Ok(())
+    }
     pub fn value(&mut self, v: &Nbt) -> Result<()> {
         match v {
             Nbt::End => {}
@@ -533,15 +589,7 @@ impl Writer {
             }),
             Nbt::String(s) => self.string(s)?,
             Nbt::RawString(bytes) => {
-                if bytes.len() > u16::MAX as usize {
-                    return Err(Error::invalid("NBT 字符串过长"));
-                }
-                if self.encoding.net() {
-                    self.varuint(bytes.len() as u64);
-                } else {
-                    self.short(bytes.len() as i16);
-                }
-                self.data.extend(bytes);
+                self.string_bytes(bytes)?;
             }
             Nbt::ByteArray(v) => {
                 self.int(i32::try_from(v.len()).map_err(|_| Error::invalid("NBT 数组过长"))?);
@@ -567,6 +615,14 @@ impl Writer {
                     self.data.push(v.tag());
                     self.string(k)?;
                     self.value(v)?;
+                }
+                self.data.push(0);
+            }
+            Nbt::RawCompound(m) => {
+                for (key, value) in m {
+                    self.data.push(value.tag());
+                    self.string_bytes(key)?;
+                    self.value(value)?;
                 }
                 self.data.push(0);
             }
@@ -671,6 +727,17 @@ pub fn to_snbt(v: &Nbt) -> String {
             "{{{}}}",
             v.iter()
                 .map(|(k, v)| format!("{}:{}", serde_json::to_string(k).unwrap(), to_snbt(v)))
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        Nbt::RawCompound(v) => format!(
+            "{{{}}}",
+            v.iter()
+                .map(|(k, v)| format!(
+                    "{}:{}",
+                    serde_json::to_string(&String::from_utf8_lossy(k)).unwrap(),
+                    to_snbt(v)
+                ))
                 .collect::<Vec<_>>()
                 .join(",")
         ),

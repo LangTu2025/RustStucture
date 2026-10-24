@@ -361,6 +361,96 @@ fn tag_reader_read_tag_list_low_level_has_no_decoder_depth_limit() {
 }
 
 #[test]
+fn tag_reader_read_tag_compound_handles_end_nested_and_duplicate_names() {
+    let bytes = [
+        1, 1, 0, b'x', 1,
+        1, 1, 0, b'x', 2,
+        10, 1, 0, b'n', 1, 1, 0, b'y', 3, 0,
+        0,
+    ];
+    let mut reader = nbt::Reader::new(&bytes, Encoding::LittleEndian);
+    let Nbt::Compound(compound) = reader.compound().unwrap() else {
+        panic!("expected UTF-8-keyed compound");
+    };
+    assert_eq!(compound["x"], Nbt::Byte(2));
+    assert_eq!(
+        compound["n"],
+        Nbt::Compound(BTreeMap::from([("y".into(), Nbt::Byte(3))]))
+    );
+    assert_eq!(reader.pos, bytes.len());
+}
+
+#[test]
+fn tag_reader_read_tag_compound_preserves_non_utf8_keys() {
+    let bytes = [1, 1, 0, 0xff, 9, 0];
+    let mut reader = nbt::Reader::new(&bytes, Encoding::LittleEndian);
+    let compound = reader.compound().unwrap();
+    assert_eq!(
+        compound,
+        Nbt::RawCompound(BTreeMap::from([(vec![0xff], Nbt::Byte(9))]))
+    );
+    for encoding in [
+        Encoding::BigEndian,
+        Encoding::LittleEndian,
+        Encoding::NetworkBigEndian,
+        Encoding::NetworkLittleEndian,
+    ] {
+        let encoded = nbt::encode("", &compound, encoding).unwrap();
+        assert_eq!(nbt::decode(&encoded, encoding).unwrap().1, compound);
+    }
+}
+
+#[test]
+fn tag_reader_read_tag_compound_rejects_unknown_type_before_name() {
+    let mut reader = nbt::Reader::new(&[13, 1, 0, b'x'], Encoding::LittleEndian);
+    assert!(reader.compound().is_err());
+    assert_eq!(reader.pos, 1);
+}
+
+#[test]
+fn tag_reader_read_tag_compound_propagates_truncated_name_and_value() {
+    let mut name = nbt::Reader::new(&[1, 2, 0, b'x'], Encoding::LittleEndian);
+    assert!(name.compound().is_err());
+    assert_eq!(name.pos, 4);
+
+    let mut value = nbt::Reader::new(&[1, 1, 0, b'x'], Encoding::LittleEndian);
+    assert!(value.compound().is_err());
+    assert_eq!(value.pos, 5);
+}
+
+#[test]
+fn tag_reader_read_tag_compound_stops_at_end_and_last_duplicate_wins() {
+    let bytes = [
+        1, 1, 0, b'x', 7,
+        1, 1, 0, b'x', 9,
+        0, 99,
+    ];
+    let mut reader = nbt::Reader::new(&bytes, Encoding::LittleEndian);
+    assert_eq!(
+        reader.compound().unwrap(),
+        Nbt::Compound(BTreeMap::from([("x".into(), Nbt::Byte(9))]))
+    );
+    assert_eq!(reader.pos, 11);
+    assert_eq!(reader.byte().unwrap(), 99);
+}
+
+#[test]
+fn tag_reader_read_tag_compound_rejects_unknown_tag_before_name() {
+    let mut reader = nbt::Reader::new(&[13, 1, 0, b'x'], Encoding::LittleEndian);
+    assert!(reader.compound().is_err());
+    assert_eq!(reader.pos, 1);
+}
+
+#[test]
+fn tag_reader_read_tag_compound_preserves_non_utf8_name_bytes() {
+    let raw = Nbt::RawCompound(BTreeMap::from([(vec![0xff, b'k'], Nbt::Byte(4))]));
+    let encoded = nbt::encode("root", &raw, Encoding::LittleEndian).unwrap();
+    let decoded = nbt::decode(&encoded, Encoding::LittleEndian).unwrap();
+    assert_eq!(decoded.1, raw);
+    assert_eq!(nbt::encode(&decoded.0, &decoded.1, Encoding::LittleEndian).unwrap(), encoded);
+}
+
+#[test]
 fn tag_reader_read_tag_and_end() {
     let mut reader = nbt::Reader::new(&[1, 4, 0, b't', b'e', b's', b't'], Encoding::LittleEndian);
     assert_eq!(reader.read_tag().unwrap(), (1, "test".into()));
@@ -417,6 +507,7 @@ fn tag_reader_read_tag_string_preserves_bytes_for_all_encodings() {
 fn tag_reader_read_tag_string_rejects_truncation_and_long_network_strings() {
     let mut truncated = nbt::Reader::new(&[2, 0, b'A'], Encoding::LittleEndian);
     assert!(truncated.tag_string_bytes().is_err());
+    assert_eq!(truncated.pos, 3);
 
     let mut max_network_string = vec![0xff, 0xff, 0x01];
     max_network_string.resize(3 + i16::MAX as usize, b'x');

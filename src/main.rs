@@ -116,6 +116,9 @@ fn canonical_nbt(value: &rust_water_structure::nbt::Nbt) -> serde_json::Value {
         Nbt::Compound(value) => {
             json!({"type":"Compound","value":value.iter().map(|(key,value)|(key.clone(),canonical_nbt(value))).collect::<std::collections::BTreeMap<_,_>>()})
         }
+        Nbt::RawCompound(value) => {
+            json!({"type":"Compound","value":value.iter().map(|(key,value)|(String::from_utf8_lossy(key).into_owned(),canonical_nbt(value))).collect::<std::collections::BTreeMap<_,_>>()})
+        }
         Nbt::List(value) => {
             json!({"type":"List","value":value.iter().map(canonical_nbt).collect::<Vec<_>>()})
         }

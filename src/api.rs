@@ -447,11 +447,48 @@ fn shift_positions(value: &mut Compound, offset: Pos) -> Result<()> {
                 }
             }
             Some(Nbt::Compound(value)) => shift_positions(value, offset)?,
+            Some(Nbt::RawCompound(value)) => shift_raw_positions(value, offset)?,
             _ => {}
         }
     }
-    if let Some(Nbt::Compound(nbt)) = value.get_mut("nbt") {
+    if let Some(nbt) = value.get_mut("nbt") {
+        match nbt {
+            Nbt::Compound(nbt) => shift_positions(nbt, offset)?,
+            Nbt::RawCompound(nbt) => shift_raw_positions(nbt, offset)?,
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn shift_raw_positions(value: &mut crate::nbt::RawCompound, offset: Pos) -> Result<()> {
+    for (key, shift) in [(b"x".as_slice(), offset.0), (b"y", offset.1), (b"z", offset.2)] {
+        if let Some(value) = value.get_mut(key) {
+            shift_number(value, shift)?;
+        }
+    }
+    for key in [b"Pos".as_slice(), b"pos", b"blockPos"] {
+        match value.get_mut(key) {
+            Some(Nbt::List(values)) if values.len() == 3 => {
+                for (value, shift) in values.iter_mut().zip([offset.0, offset.1, offset.2]) {
+                    shift_number(value, shift)?;
+                }
+            }
+            Some(Nbt::IntArray(values)) if values.len() == 3 => {
+                for (value, shift) in values.iter_mut().zip([offset.0, offset.1, offset.2]) {
+                    *value = checked_add(*value, shift)?;
+                }
+            }
+            Some(Nbt::Compound(value)) => shift_positions(value, offset)?,
+            Some(Nbt::RawCompound(value)) => shift_raw_positions(value, offset)?,
+            _ => {}
+        }
+    }
+    if let Some(Nbt::Compound(nbt)) = value.get_mut(b"nbt".as_slice()) {
         shift_positions(nbt, offset)?;
+    }
+    if let Some(Nbt::RawCompound(nbt)) = value.get_mut(b"nbt".as_slice()) {
+        shift_raw_positions(nbt, offset)?;
     }
     Ok(())
 }
@@ -586,6 +623,11 @@ fn preserves_nbt(source: &Nbt, output: &Nbt) -> bool {
                 .get(key)
                 .is_some_and(|after| preserves_nbt(value, after))
         }),
+        (Nbt::RawCompound(source), Nbt::RawCompound(output)) => source.iter().all(|(key, value)| {
+            output
+                .get(key)
+                .is_some_and(|after| preserves_nbt(value, after))
+        }),
         (Nbt::List(source), Nbt::List(output)) => {
             source.len() == output.len()
                 && source
@@ -601,6 +643,10 @@ fn has_raw_string(value: &Nbt) -> bool {
     match value {
         Nbt::RawString(_) => true,
         Nbt::Compound(values) => values.values().any(has_raw_string),
+        Nbt::RawCompound(values) => {
+            values.keys().any(|key| std::str::from_utf8(key).is_err())
+                || values.values().any(has_raw_string)
+        }
         Nbt::List(values) => values.iter().any(has_raw_string),
         _ => false,
     }
