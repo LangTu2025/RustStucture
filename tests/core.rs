@@ -346,6 +346,21 @@ fn tag_reader_read_tag_list_network_encoding() {
 }
 
 #[test]
+fn tag_reader_read_tag_list_low_level_has_no_decoder_depth_limit() {
+    let mut bytes = Vec::new();
+    for _ in 0..520 {
+        bytes.extend([9, 1, 0, 0, 0]);
+    }
+    bytes.extend([0, 0, 0, 0, 0]);
+    let mut reader = nbt::Reader::new(&bytes, Encoding::LittleEndian);
+    assert!(reader.list().is_ok());
+
+    let mut named = vec![9, 0, 0];
+    named.extend_from_slice(&bytes);
+    assert!(nbt::decode(&named, Encoding::LittleEndian).is_err());
+}
+
+#[test]
 fn tag_reader_read_tag_and_end() {
     let mut reader = nbt::Reader::new(&[1, 4, 0, b't', b'e', b's', b't'], Encoding::LittleEndian);
     assert_eq!(reader.read_tag().unwrap(), (1, "test".into()));

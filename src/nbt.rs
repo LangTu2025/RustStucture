@@ -371,9 +371,9 @@ impl<'a> Reader<'a> {
         Ok(values)
     }
     pub fn list(&mut self) -> Result<Vec<Nbt>> {
-        self.list_at_depth(0)
+        self.list_at_depth(0, false)
     }
-    fn list_at_depth(&mut self, depth: usize) -> Result<Vec<Nbt>> {
+    fn list_at_depth(&mut self, depth: usize, enforce_depth_limit: bool) -> Result<Vec<Nbt>> {
         let element_tag = self.byte()?;
         if element_tag > 12 {
             return Err(Error::invalid(format!("无效 NBT 列表元素标签 {element_tag}")));
@@ -387,13 +387,16 @@ impl<'a> Reader<'a> {
             if element_tag == 0 {
                 values.push(Nbt::End);
             } else {
-                values.push(self.value(element_tag, depth + 1)?);
+                values.push(self.value_inner(element_tag, depth + 1, enforce_depth_limit)?);
             }
         }
         Ok(values)
     }
     pub fn value(&mut self, tag: u8, depth: usize) -> Result<Nbt> {
-        if depth > 512 {
+        self.value_inner(tag, depth, false)
+    }
+    fn value_inner(&mut self, tag: u8, depth: usize, enforce_depth_limit: bool) -> Result<Nbt> {
+        if enforce_depth_limit && depth > 512 {
             return Err(Error::invalid("NBT 嵌套过深"));
         }
         Ok(match tag {
@@ -411,7 +414,7 @@ impl<'a> Reader<'a> {
                     Err(error) => Nbt::RawString(error.into_bytes()),
                 }
             }
-            9 => Nbt::List(self.list_at_depth(depth)?),
+            9 => Nbt::List(self.list_at_depth(depth, enforce_depth_limit)?),
             10 => {
                 let mut m = BTreeMap::new();
                 loop {
@@ -420,7 +423,10 @@ impl<'a> Reader<'a> {
                         break;
                     }
                     let name = self.string()?;
-                    m.insert(name, self.value(t, depth + 1)?);
+                    m.insert(
+                        name,
+                        self.value_inner(t, depth + 1, enforce_depth_limit)?,
+                    );
                 }
                 Nbt::Compound(m)
             }
@@ -440,7 +446,7 @@ impl<'a> Reader<'a> {
         } else {
             self.string()?
         };
-        Ok((name, self.value(tag, 0)?))
+        Ok((name, self.value_inner(tag, 0, true)?))
     }
 }
 pub fn decode(bytes: &[u8], encoding: Encoding) -> Result<(String, Nbt)> {
