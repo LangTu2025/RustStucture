@@ -69,6 +69,23 @@ fn tag_reader_read_tag_type() {
 }
 
 #[test]
+fn tag_reader_read_tag_and_end() {
+    let mut reader = nbt::Reader::new(&[1, 4, 0, b't', b'e', b's', b't'], Encoding::LittleEndian);
+    assert_eq!(reader.read_tag().unwrap(), (1, "test".into()));
+
+    let mut end = nbt::Reader::new(&[0, 4, 0, b'x'], Encoding::LittleEndian);
+    assert_eq!(end.read_tag().unwrap(), (0, String::new()));
+    assert_eq!(end.pos, 1);
+}
+
+#[test]
+fn tag_reader_read_tag_rejects_unknown_type_before_name() {
+    let mut reader = nbt::Reader::new(&[13, 4, 0, b'x'], Encoding::LittleEndian);
+    assert!(reader.read_tag().is_err());
+    assert_eq!(reader.pos, 1);
+}
+
+#[test]
 fn tag_reader_read_tag_string() {
     let mut reader = nbt::Reader::new(&[2, 0, b'H', b'i'], Encoding::LittleEndian);
     assert_eq!(reader.string().unwrap(), "Hi");

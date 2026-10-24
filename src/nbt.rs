@@ -270,6 +270,16 @@ impl<'a> Reader<'a> {
         }
         Ok(self.take(n)?.to_vec())
     }
+    pub fn read_tag(&mut self) -> Result<(u8, String)> {
+        let tag = self.tag_type()?;
+        if tag > 12 {
+            return Err(Error::invalid(format!("无效 NBT 标签 {tag}")));
+        }
+        if tag == 0 {
+            return Ok((tag, String::new()));
+        }
+        Ok((tag, self.string()?))
+    }
     pub fn value(&mut self, tag: u8, depth: usize) -> Result<Nbt> {
         if depth > 512 {
             return Err(Error::invalid("NBT 嵌套过深"));
