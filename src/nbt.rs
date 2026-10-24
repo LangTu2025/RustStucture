@@ -172,6 +172,9 @@ impl<'a> Reader<'a> {
             Error::Io(std::io::Error::from(std::io::ErrorKind::UnexpectedEof))
         })
     }
+    pub fn tag_type(&mut self) -> Result<u8> {
+        self.byte()
+    }
     pub fn varuint(&mut self, max: usize) -> Result<u64> {
         let mut v = 0;
         for i in 0..max {

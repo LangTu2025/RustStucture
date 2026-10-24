@@ -62,6 +62,13 @@ fn tag_reader_read_tag_byte_eof_matches_go_reader() {
 }
 
 #[test]
+fn tag_reader_read_tag_type() {
+    let mut reader = nbt::Reader::new(&[1, 0x42], Encoding::LittleEndian);
+    assert_eq!(reader.tag_type().unwrap(), 1);
+    assert_eq!(reader.pos, 1);
+}
+
+#[test]
 fn tag_reader_read_tag_string() {
     let mut reader = nbt::Reader::new(&[2, 0, b'H', b'i'], Encoding::LittleEndian);
     assert_eq!(reader.string().unwrap(), "Hi");
