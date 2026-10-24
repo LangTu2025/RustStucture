@@ -232,7 +232,14 @@ impl<'a> Reader<'a> {
         } else {
             self.short()? as u16 as usize
         };
+        if self.encoding.net() && n > i16::MAX as usize {
+            return Err(Error::invalid("字符串过长"));
+        }
         Ok(self.take(n)?.to_vec())
+    }
+
+    pub fn tag_string_bytes(&mut self) -> Result<Vec<u8>> {
+        self.string_bytes()
     }
 
     pub fn string(&mut self) -> Result<String> {

@@ -76,6 +76,38 @@ fn tag_reader_read_tag_string() {
 }
 
 #[test]
+fn tag_reader_read_tag_string_preserves_bytes_for_all_encodings() {
+    for (encoding, prefix) in [
+        (Encoding::BigEndian, vec![0, 2]),
+        (Encoding::LittleEndian, vec![2, 0]),
+        (Encoding::NetworkBigEndian, vec![0, 2]),
+        (Encoding::NetworkLittleEndian, vec![2]),
+    ] {
+        let mut bytes = prefix;
+        bytes.extend([0xff, b'A']);
+        let mut reader = nbt::Reader::new(&bytes, encoding);
+        assert_eq!(reader.tag_string_bytes().unwrap(), [0xff, b'A']);
+        assert_eq!(reader.pos, bytes.len());
+    }
+}
+
+#[test]
+fn tag_reader_read_tag_string_rejects_truncation_and_long_network_strings() {
+    let mut truncated = nbt::Reader::new(&[2, 0, b'A'], Encoding::LittleEndian);
+    assert!(truncated.tag_string_bytes().is_err());
+
+    let mut max_network_string = vec![0xff, 0xff, 0x01];
+    max_network_string.resize(3 + i16::MAX as usize, b'x');
+    let mut reader = nbt::Reader::new(&max_network_string, Encoding::NetworkLittleEndian);
+    assert_eq!(reader.tag_string_bytes().unwrap().len(), i16::MAX as usize);
+
+    let mut too_long = vec![0x80, 0x80, 0x02];
+    too_long.resize(3 + i16::MAX as usize + 1, b'x');
+    let mut reader = nbt::Reader::new(&too_long, Encoding::NetworkLittleEndian);
+    assert!(reader.tag_string_bytes().is_err());
+}
+
+#[test]
 fn tag_reader_read_tag_byte_array() {
     let mut reader = nbt::Reader::new(&[3, 0, 0, 0, 1, 2, 3], Encoding::LittleEndian);
     assert_eq!(reader.value(7, 0).unwrap(), Nbt::ByteArray(vec![1, 2, 3]));
