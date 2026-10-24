@@ -110,14 +110,22 @@ fn tag_reader_read_tag_string_rejects_truncation_and_long_network_strings() {
 #[test]
 fn tag_reader_read_tag_byte_array() {
     let mut reader = nbt::Reader::new(&[3, 0, 0, 0, 1, 2, 3], Encoding::LittleEndian);
-    assert_eq!(reader.value(7, 0).unwrap(), Nbt::ByteArray(vec![1, 2, 3]));
+    assert_eq!(reader.byte_array().unwrap(), [1, 2, 3]);
     assert_eq!(reader.pos, 7);
 }
 
 #[test]
 fn tag_reader_read_tag_byte_array_negative_length() {
     let mut reader = nbt::Reader::new(&[255, 255, 255, 255], Encoding::LittleEndian);
-    assert!(reader.value(7, 0).is_err());
+    assert!(reader.byte_array().is_err());
+    assert_eq!(reader.pos, 4);
+}
+
+#[test]
+fn tag_reader_read_tag_byte_array_truncated_payload_consumes_available_bytes() {
+    let mut reader = nbt::Reader::new(&[3, 0, 0, 0, 1, 2], Encoding::LittleEndian);
+    assert!(reader.byte_array().is_err());
+    assert_eq!(reader.pos, 6);
 }
 
 #[test]

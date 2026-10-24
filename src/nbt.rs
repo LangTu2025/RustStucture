@@ -257,6 +257,19 @@ impl<'a> Reader<'a> {
         }
         Ok(n)
     }
+    pub fn byte_array(&mut self) -> Result<Vec<u8>> {
+        let n = self.int()?;
+        if n < 0 {
+            return Err(Error::invalid("NBT 数组长度为负数"));
+        }
+        let n = n as usize;
+        let available = self.data.len().saturating_sub(self.pos);
+        if n > available {
+            self.pos += available;
+            return Err(Error::invalid("NBT 数组越界"));
+        }
+        Ok(self.take(n)?.to_vec())
+    }
     pub fn value(&mut self, tag: u8, depth: usize) -> Result<Nbt> {
         if depth > 512 {
             return Err(Error::invalid("NBT 嵌套过深"));
@@ -284,10 +297,7 @@ impl<'a> Reader<'a> {
                     f64::from_be_bytes(b)
                 })
             }
-            7 => {
-                let n = self.length()?;
-                Nbt::ByteArray(self.take(n)?.iter().map(|b| *b as i8).collect())
-            }
+            7 => Nbt::ByteArray(self.byte_array()?.into_iter().map(|b| b as i8).collect()),
             8 => {
                 let bytes = self.string_bytes()?;
                 match String::from_utf8(bytes) {
