@@ -1,2 +1,16 @@
 /target/
 /work/
+.env
+.env.*
+!.env.example
+*.local.toml
+*.local.yaml
+*.local.yml
+*.local.json
+*.key
+*.pem
+*.tmp
+*.temp
+*.swp
+.DS_Store
+Thumbs.db
