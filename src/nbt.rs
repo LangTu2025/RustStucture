@@ -191,6 +191,13 @@ impl<'a> Reader<'a> {
     }
     pub fn short(&mut self) -> Result<i16> {
         let le = self.encoding.le();
+        let available = self.data.len().saturating_sub(self.pos);
+        if available < 2 {
+            self.pos += available;
+            return Err(Error::Io(std::io::Error::from(
+                std::io::ErrorKind::UnexpectedEof,
+            )));
+        }
         let b = self.take(2)?.try_into().unwrap();
         Ok(if le {
             i16::from_le_bytes(b)

@@ -69,6 +69,29 @@ fn tag_reader_read_tag_type() {
 }
 
 #[test]
+fn tag_reader_read_tag_int16_uses_encoding_endianness() {
+    let mut little = nbt::Reader::new(&[0x34, 0x12], Encoding::LittleEndian);
+    assert_eq!(little.short().unwrap(), 0x1234);
+    assert_eq!(little.pos, 2);
+
+    let mut big = nbt::Reader::new(&[0x12, 0x34], Encoding::BigEndian);
+    assert_eq!(big.short().unwrap(), 0x1234);
+    assert_eq!(big.pos, 2);
+}
+
+#[test]
+fn tag_reader_read_tag_int16_truncation_consumes_available_bytes() {
+    let mut reader = nbt::Reader::new(&[0x34], Encoding::LittleEndian);
+    let error = reader.short().unwrap_err();
+    assert!(matches!(
+        error,
+        rust_water_structure::Error::Io(ref error)
+            if error.kind() == std::io::ErrorKind::UnexpectedEof
+    ));
+    assert_eq!(reader.pos, 1);
+}
+
+#[test]
 fn tag_reader_read_tag_and_end() {
     let mut reader = nbt::Reader::new(&[1, 4, 0, b't', b'e', b's', b't'], Encoding::LittleEndian);
     assert_eq!(reader.read_tag().unwrap(), (1, "test".into()));
