@@ -231,6 +231,42 @@ fn tag_reader_read_tag_float64_truncation_consumes_available_bytes() {
 }
 
 #[test]
+fn tag_reader_read_tag_int32_array_matches_all_encodings_and_empty_count() {
+    let fixed_le = [2, 0, 0, 0, 1, 0, 0, 0, 0xfe, 0xff, 0xff, 0xff];
+    let fixed_be = [0, 0, 0, 2, 0, 0, 0, 1, 0xff, 0xff, 0xff, 0xfe];
+    for (encoding, bytes) in [(Encoding::LittleEndian, &fixed_le[..]), (Encoding::BigEndian, &fixed_be[..])] {
+        let mut reader = nbt::Reader::new(bytes, encoding);
+        assert_eq!(reader.int_array().unwrap(), [1, -2]);
+        assert_eq!(reader.pos, bytes.len());
+    }
+
+    let mut network = nbt::Reader::new(&[8, 4, 2, 1, 2], Encoding::NetworkLittleEndian);
+    assert_eq!(network.int_array().unwrap(), [2, 1, -1, 1]);
+
+    let mut empty = nbt::Reader::new(&[0, 0, 0, 0], Encoding::LittleEndian);
+    let values = empty.int_array().unwrap();
+    assert!(values.is_empty());
+}
+
+#[test]
+fn tag_reader_read_tag_int32_array_truncation_consumes_available_bytes() {
+    let mut reader = nbt::Reader::new(&[2, 0, 0, 0, 1, 0, 0], Encoding::LittleEndian);
+    assert!(reader.int_array().is_err());
+    assert_eq!(reader.pos, 7);
+}
+
+#[test]
+fn tag_reader_read_tag_int32_array_negative_length_panics_like_go() {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut reader = nbt::Reader::new(&[0xff, 0xff, 0xff, 0xff], Encoding::LittleEndian);
+        let _ = reader.int_array();
+    }));
+    let payload = result.expect_err("negative array length should panic");
+    let text = payload.downcast_ref::<&str>().copied().unwrap_or_default();
+    assert_eq!(text, "runtime error: makeslice: len out of range");
+}
+
+#[test]
 fn tag_reader_read_tag_and_end() {
     let mut reader = nbt::Reader::new(&[1, 4, 0, b't', b'e', b's', b't'], Encoding::LittleEndian);
     assert_eq!(reader.read_tag().unwrap(), (1, "test".into()));

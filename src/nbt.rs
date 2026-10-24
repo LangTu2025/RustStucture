@@ -355,6 +355,17 @@ impl<'a> Reader<'a> {
         }
         Ok(Some(self.value(tag, 0)?))
     }
+    pub fn int_array(&mut self) -> Result<Vec<i32>> {
+        let count = self.int()?;
+        if count < 0 {
+            panic!("runtime error: makeslice: len out of range");
+        }
+        let mut values = Vec::with_capacity(count as usize);
+        for _ in 0..count {
+            values.push(self.int()?);
+        }
+        Ok(values)
+    }
     pub fn value(&mut self, tag: u8, depth: usize) -> Result<Nbt> {
         if depth > 512 {
             return Err(Error::invalid("NBT 嵌套过深"));
@@ -396,12 +407,7 @@ impl<'a> Reader<'a> {
                 Nbt::Compound(m)
             }
             11 => {
-                let n = self.length()?;
-                let mut v = Vec::with_capacity(n.min(4096));
-                for _ in 0..n {
-                    v.push(self.int()?);
-                }
-                Nbt::IntArray(v)
+                Nbt::IntArray(self.int_array()?)
             }
             12 => {
                 let n = self.length()?;
