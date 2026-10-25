@@ -1082,6 +1082,100 @@ fn tag_writer_write_tag_value_dispatches_go_types_and_errors() {
 }
 
 #[test]
+fn tag_writer_write_tag_list_matches_go_types_partial_output_and_depth_limit() {
+    let mut empty = nbt::Writer::new(Encoding::LittleEndian);
+    empty.write_tag_list(&[]).unwrap();
+    assert_eq!(empty.data, [0, 0, 0, 0, 0]);
+
+    let mut end_element = nbt::Writer::new(Encoding::LittleEndian);
+    assert_eq!(
+        end_element
+            .write_tag_list(&[Nbt::End])
+            .unwrap_err()
+            .to_string(),
+        "nbt: 值类型 <nil>（列表[0]）无法转换为 NBT 标签"
+    );
+    assert!(end_element.data.is_empty());
+
+    let mut mixed = nbt::Writer::new(Encoding::LittleEndian);
+    assert_eq!(
+        mixed
+            .write_tag_list(&[Nbt::Int(1), Nbt::String("bad".into())])
+            .unwrap_err()
+            .to_string(),
+        "nbt: 值类型 string（列表[1]）无法转换为 NBT 标签"
+    );
+    assert_eq!(mixed.data, [3, 2, 0, 0, 0, 1, 0, 0, 0]);
+    let mut mixed_sink = nbt::OffsetWriter::new(nbt::IoWriteSink::new(Vec::new()));
+    assert_eq!(
+        nbt::Writer::new(Encoding::LittleEndian)
+            .write_tag_list_to(
+                &mut mixed_sink,
+                &[Nbt::Int(1), Nbt::String("bad".into())]
+            )
+            .unwrap_err()
+            .to_string(),
+        "nbt: 值类型 string（列表[1]）无法转换为 NBT 标签"
+    );
+    assert_eq!(mixed_sink.get_offset(), 9);
+    assert_eq!(
+        mixed_sink.into_inner().into_inner(),
+        [3, 2, 0, 0, 0, 1, 0, 0, 0]
+    );
+
+    let mut accepted = Nbt::Int(1);
+    for _ in 0..511 {
+        accepted = Nbt::List(vec![accepted]);
+    }
+    let mut writer = nbt::Writer::new(Encoding::LittleEndian);
+    writer.write_tag_list(std::slice::from_ref(&accepted)).unwrap();
+    let expected = writer.data.clone();
+    let mut sink = nbt::OffsetWriter::new(nbt::IoWriteSink::new(Vec::new()));
+    nbt::Writer::new(Encoding::LittleEndian)
+        .write_tag_list_to(&mut sink, std::slice::from_ref(&accepted))
+        .unwrap();
+    assert_eq!(sink.get_offset(), expected.len() as u64);
+    assert_eq!(sink.into_inner().into_inner(), expected);
+
+    for encoding in [
+        Encoding::LittleEndian,
+        Encoding::BigEndian,
+        Encoding::NetworkLittleEndian,
+        Encoding::NetworkBigEndian,
+    ] {
+        let mut memory = nbt::Writer::new(encoding);
+        memory.write_tag_list(&[Nbt::Int(150)]).unwrap();
+        let mut sink = nbt::OffsetWriter::new(nbt::IoWriteSink::new(Vec::new()));
+        nbt::Writer::new(encoding)
+            .write_tag_list_to(&mut sink, &[Nbt::Int(150)])
+            .unwrap();
+        assert_eq!(sink.into_inner().into_inner(), memory.data, "{encoding:?}");
+    }
+
+    let raw_string = Nbt::List(vec![Nbt::RawString(vec![0xff])]);
+    let encoded = nbt::encode("", &raw_string, Encoding::LittleEndian).unwrap();
+    assert_eq!(encoded, [9, 0, 0, 8, 1, 0, 0, 0, 1, 0, 0xff]);
+    let mut raw_sink = nbt::OffsetWriter::new(nbt::IoWriteSink::new(Vec::new()));
+    nbt::Writer::new(Encoding::LittleEndian)
+        .write_tag_list_to(&mut raw_sink, &[Nbt::RawString(vec![0xff])])
+        .unwrap();
+    assert_eq!(raw_sink.into_inner().into_inner(), [8, 1, 0, 0, 0, 1, 0, 0xff]);
+
+    let mut too_deep = Nbt::Int(1);
+    for _ in 0..512 {
+        too_deep = Nbt::List(vec![too_deep]);
+    }
+    let mut writer = nbt::Writer::new(Encoding::LittleEndian);
+    assert_eq!(
+        writer
+            .write_tag_list(std::slice::from_ref(&too_deep))
+            .unwrap_err()
+            .to_string(),
+        "nbt: 达到最大嵌套深度 512"
+    );
+}
+
+#[test]
 fn tag_writer_write_tag_byte_appends_raw_byte_values() {
     let mut writer = nbt::Writer::new(Encoding::BigEndian);
     writer.write_tag_byte(0).unwrap();

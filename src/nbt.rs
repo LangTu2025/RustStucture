@@ -733,7 +733,181 @@ impl Writer {
                 ""
             )));
         }
-        self.value(value)
+        self.value_at_depth(value, 0)
+    }
+    pub fn write_tag_list(&mut self, values: &[Nbt]) -> Result<()> {
+        self.write_tag_list_at_depth(values, 0, "")
+    }
+    pub fn write_tag_list_to<S: TagWriteSink>(
+        &self,
+        writer: &mut OffsetWriter<S>,
+        values: &[Nbt],
+    ) -> Result<()> {
+        self.write_tag_list_to_at_depth(writer, values, 0, "")
+    }
+    fn write_tag_list_to_at_depth<S: TagWriteSink>(
+        &self,
+        writer: &mut OffsetWriter<S>,
+        values: &[Nbt],
+        depth: usize,
+        list_name: &str,
+    ) -> Result<()> {
+        if depth >= 512 {
+            return Err(Error::Other("nbt: 达到最大嵌套深度 512".into()));
+        }
+        let element_tag = values.first().map_or(0, Nbt::tag);
+        if element_tag == 0 && !values.is_empty() {
+            return Err(Self::incompatible_list_value(&values[0], list_name, 0));
+        }
+        self.write_tag_byte_to(writer, element_tag)?;
+        self.write_tag_int32_to(writer, values.len() as i32)?;
+        for (index, value) in values.iter().enumerate() {
+            if value.tag() != element_tag {
+                return Err(Self::incompatible_list_value(value, list_name, index));
+            }
+            self.write_value_to_at_depth(writer, value, depth + 1)?;
+        }
+        Ok(())
+    }
+    fn write_value_to_at_depth<S: TagWriteSink>(
+        &self,
+        writer: &mut OffsetWriter<S>,
+        value: &Nbt,
+        depth: usize,
+    ) -> Result<()> {
+        match value {
+            Nbt::End => Ok(()),
+            Nbt::Byte(value) => self.write_tag_byte_to(writer, *value as u8),
+            Nbt::Short(value) => self.write_tag_int16_to(writer, *value),
+            Nbt::Int(value) => self.write_tag_int32_to(writer, *value),
+            Nbt::Long(value) => self.write_tag_int64_to(writer, *value),
+            Nbt::Float(value) => self.write_tag_float32_to(writer, *value),
+            Nbt::Double(value) => self.write_tag_float64_to(writer, *value),
+            Nbt::String(value) => self.write_tag_string_to(writer, value),
+            Nbt::RawString(value) => self.write_tag_string_bytes_to(writer, value),
+            Nbt::ByteArray(values) => {
+                let bytes: Vec<u8> = values.iter().map(|value| *value as u8).collect();
+                self.write_tag_byte_array_to(writer, &bytes)
+            }
+            Nbt::IntArray(values) => self.write_tag_int32_array_to(writer, values),
+            Nbt::LongArray(values) => self.write_tag_int64_array_to(writer, values),
+            Nbt::List(values) => {
+                self.write_tag_list_to_at_depth(writer, values, depth, "")
+            }
+            Nbt::Compound(values) => {
+                if depth >= 512 {
+                    return Err(Error::Other("nbt: 达到最大嵌套深度 512".into()));
+                }
+                for (name, value) in values {
+                    if value.tag() == 0 {
+                        return Err(Self::incompatible_value(value, name));
+                    }
+                    self.write_tag_byte_to(writer, value.tag())?;
+                    self.write_tag_string_to(writer, name)?;
+                    self.write_value_to_at_depth(writer, value, depth + 1)?;
+                }
+                self.write_tag_byte_to(writer, 0)
+            }
+            Nbt::RawCompound(values) => {
+                if depth >= 512 {
+                    return Err(Error::Other("nbt: 达到最大嵌套深度 512".into()));
+                }
+                for (name, value) in values {
+                    if value.tag() == 0 {
+                        let name = String::from_utf8_lossy(name);
+                        return Err(Self::incompatible_value(value, &name));
+                    }
+                    self.write_tag_byte_to(writer, value.tag())?;
+                    self.write_tag_string_bytes_to(writer, name)?;
+                    self.write_value_to_at_depth(writer, value, depth + 1)?;
+                }
+                self.write_tag_byte_to(writer, 0)
+            }
+        }
+    }
+    fn write_tag_string_bytes_to<S: TagWriteSink>(
+        &self,
+        writer: &mut OffsetWriter<S>,
+        value: &[u8],
+    ) -> Result<()> {
+        if value.len() > i16::MAX as usize {
+            return Err(Error::Other(format!(
+                "nbt: 偏移 {} 的字符串无效: 字符串长度超过最大限制（长度={}）",
+                writer.offset,
+                value.len()
+            )));
+        }
+        if self.encoding.net() {
+            let mut prefix = Self::new(self.encoding);
+            prefix.varuint(value.len() as u64);
+            for byte in prefix.data {
+                self.write_tag_byte_to(writer, byte)?;
+            }
+        } else {
+            self.write_tag_int16_to(writer, value.len() as i16)?;
+        }
+        if !value.is_empty() {
+            let (written, error) = writer.sink.write(value);
+            writer.offset += written as u64;
+            if let Some(error) = error {
+                return Err(Error::Other(format!(
+                    "nbt: 在偏移 {} 的操作 'WriteString' 写入失败: {error}",
+                    writer.offset
+                )));
+            }
+        }
+        Ok(())
+    }
+    fn write_tag_list_at_depth(
+        &mut self,
+        values: &[Nbt],
+        depth: usize,
+        list_name: &str,
+    ) -> Result<()> {
+        if depth >= 512 {
+            return Err(Error::Other("nbt: 达到最大嵌套深度 512".into()));
+        }
+        let element_tag = values.first().map_or(0, Nbt::tag);
+        if element_tag == 0 && !values.is_empty() {
+            return Err(Self::incompatible_list_value(&values[0], list_name, 0));
+        }
+        self.data.push(element_tag);
+        self.int(values.len() as i32);
+        for (index, value) in values.iter().enumerate() {
+            if value.tag() != element_tag {
+                return Err(Self::incompatible_list_value(value, list_name, index));
+            }
+            self.value_at_depth(value, depth + 1)?;
+        }
+        Ok(())
+    }
+    fn incompatible_list_value(value: &Nbt, list_name: &str, index: usize) -> Error {
+        let value_name = if list_name.is_empty() {
+            format!("列表[{index}]")
+        } else {
+            format!("{list_name}[{index}]")
+        };
+        Self::incompatible_value(value, &value_name)
+    }
+    fn incompatible_value(value: &Nbt, value_name: &str) -> Error {
+        let value_type = match value {
+            Nbt::End => "<nil>",
+            Nbt::Byte(_) => "uint8",
+            Nbt::Short(_) => "int16",
+            Nbt::Int(_) => "int32",
+            Nbt::Long(_) => "int64",
+            Nbt::Float(_) => "float32",
+            Nbt::Double(_) => "float64",
+            Nbt::ByteArray(_) => "[]uint8",
+            Nbt::String(_) | Nbt::RawString(_) => "string",
+            Nbt::List(_) => "[]interface {}",
+            Nbt::Compound(_) | Nbt::RawCompound(_) => "map[string]interface {}",
+            Nbt::IntArray(_) => "[]int32",
+            Nbt::LongArray(_) => "[]int64",
+        };
+        Error::Other(format!(
+            "nbt: 值类型 {value_type}（{value_name}）无法转换为 NBT 标签"
+        ))
     }
     pub fn write_tag_to<S: TagWriteSink>(
         &self,
@@ -1380,6 +1554,100 @@ impl Writer {
                 );
                 for n in v {
                     self.long(*n);
+                }
+            }
+        }
+        Ok(())
+    }
+    fn value_at_depth(&mut self, v: &Nbt, depth: usize) -> Result<()> {
+        match v {
+            Nbt::End => {}
+            Nbt::Byte(n) => self.data.push(*n as u8),
+            Nbt::Short(n) => self.short(*n),
+            Nbt::Int(n) => self.int(*n),
+            Nbt::Long(n) => self.long(*n),
+            Nbt::Float(n) => self.data.extend(if self.encoding.le() {
+                n.to_le_bytes()
+            } else {
+                n.to_be_bytes()
+            }),
+            Nbt::Double(n) => self.data.extend(if self.encoding.le() {
+                n.to_le_bytes()
+            } else {
+                n.to_be_bytes()
+            }),
+            Nbt::String(value) => self.write_tag_string(value)?,
+            Nbt::RawString(bytes) => {
+                if bytes.len() > i16::MAX as usize {
+                    return Err(Error::Other(format!(
+                        "nbt: 偏移 {} 的字符串无效: 字符串长度超过最大限制（长度={}）",
+                        self.data.len(),
+                        bytes.len()
+                    )));
+                }
+                if self.encoding.net() {
+                    self.varuint(bytes.len() as u64);
+                } else {
+                    self.short(bytes.len() as i16);
+                }
+                self.data.extend_from_slice(bytes);
+            }
+            Nbt::ByteArray(values) => {
+                self.int(i32::try_from(values.len()).map_err(|_| Error::invalid("NBT 数组过长"))?);
+                self.data.extend(values.iter().map(|value| *value as u8));
+            }
+            Nbt::List(values) => self.write_tag_list_at_depth(values, depth, "")?,
+            Nbt::Compound(values) => {
+                if depth >= 512 {
+                    return Err(Error::Other("nbt: 达到最大嵌套深度 512".into()));
+                }
+                for (name, value) in values {
+                    if value.tag() == 0 {
+                        return Err(Self::incompatible_value(value, name));
+                    }
+                    self.data.push(value.tag());
+                    self.write_tag_string(name)?;
+                    self.value_at_depth(value, depth + 1)?;
+                }
+                self.data.push(0);
+            }
+            Nbt::RawCompound(values) => {
+                if depth >= 512 {
+                    return Err(Error::Other("nbt: 达到最大嵌套深度 512".into()));
+                }
+                for (name, value) in values {
+                    if value.tag() == 0 {
+                        let name = String::from_utf8_lossy(name);
+                        return Err(Self::incompatible_value(value, &name));
+                    }
+                    self.data.push(value.tag());
+                    if name.len() > i16::MAX as usize {
+                        return Err(Error::Other(format!(
+                            "nbt: 偏移 {} 的字符串无效: 字符串长度超过最大限制（长度={}）",
+                            self.data.len(),
+                            name.len()
+                        )));
+                    }
+                    if self.encoding.net() {
+                        self.varuint(name.len() as u64);
+                    } else {
+                        self.short(name.len() as i16);
+                    }
+                    self.data.extend_from_slice(name);
+                    self.value_at_depth(value, depth + 1)?;
+                }
+                self.data.push(0);
+            }
+            Nbt::IntArray(values) => {
+                self.int(values.len().try_into().map_err(|_| Error::invalid("NBT 数组过长"))?);
+                for value in values {
+                    self.int(*value);
+                }
+            }
+            Nbt::LongArray(values) => {
+                self.int(values.len().try_into().map_err(|_| Error::invalid("NBT 数组过长"))?);
+                for value in values {
+                    self.long(*value);
                 }
             }
         }
