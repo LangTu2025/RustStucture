@@ -852,6 +852,36 @@ impl Writer {
         }
         Ok(())
     }
+    pub fn write_tag_float64(&mut self, value: f64) -> Result<()> {
+        let bits = value.to_bits();
+        self.data.extend(if self.encoding.le() {
+            bits.to_le_bytes()
+        } else {
+            bits.to_be_bytes()
+        });
+        Ok(())
+    }
+    pub fn write_tag_float64_to<S: TagWriteSink>(
+        &self,
+        writer: &mut OffsetWriter<S>,
+        value: f64,
+    ) -> Result<()> {
+        let bits = value.to_bits();
+        let bytes = if self.encoding.le() {
+            bits.to_le_bytes()
+        } else {
+            bits.to_be_bytes()
+        };
+        let (written, error) = writer.sink.write(&bytes);
+        writer.offset += written as u64;
+        if error.is_some() {
+            return Err(Error::Other(format!(
+                "nbt: 在偏移 {} 的操作 'WriteFloat64' 写入失败: <nil>",
+                writer.offset
+            )));
+        }
+        Ok(())
+    }
     pub fn varuint(&mut self, mut n: u64) {
         while n >= 128 {
             self.data.push(n as u8 | 128);
