@@ -682,6 +682,41 @@ fn tag_reader_skip_tag_int64_array_handles_negative_zero_and_truncation() {
 }
 
 #[test]
+fn tag_reader_skip_tag_list_handles_values_end_nested_and_network_count() {
+    let bytes = vec![1, 2, 0, 0, 0, 0x41, 0x42, 0x43];
+    let mut reader = nbt::Reader::new(&bytes, Encoding::LittleEndian);
+    reader.skip_list().unwrap();
+    assert_eq!(reader.byte().unwrap(), 0x43);
+
+    let mut end = nbt::Reader::new(&[0, 2, 0, 0, 0, 0x43], Encoding::LittleEndian);
+    end.skip_list().unwrap();
+    assert_eq!(end.byte().unwrap(), 0x43);
+
+    let mut nested = nbt::Reader::new(&[9, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0x42, 0x43], Encoding::LittleEndian);
+    nested.skip_list().unwrap();
+    assert_eq!(nested.byte().unwrap(), 0x43);
+
+    let mut network = nbt::Reader::new(&[1, 4, 0x41, 0x42, 0x43], Encoding::NetworkLittleEndian);
+    network.skip_list().unwrap();
+    assert_eq!(network.byte().unwrap(), 0x43);
+}
+
+#[test]
+fn tag_reader_skip_tag_list_rejects_invalid_and_negative_and_propagates_truncation() {
+    let mut invalid = nbt::Reader::new(&[13, 0, 0, 0, 0], Encoding::LittleEndian);
+    assert!(invalid.skip_list().is_err());
+    assert_eq!(invalid.pos, 1);
+
+    let mut negative = nbt::Reader::new(&[1, 0xff, 0xff, 0xff, 0xff], Encoding::LittleEndian);
+    assert!(negative.skip_list().is_err());
+    assert_eq!(negative.pos, 5);
+
+    let mut truncated = nbt::Reader::new(&[1, 2, 0, 0, 0, 0x41], Encoding::LittleEndian);
+    assert!(truncated.skip_list().is_err());
+    assert_eq!(truncated.pos, 7);
+}
+
+#[test]
 fn tag_reader_read_tag_and_end() {
     let mut reader = nbt::Reader::new(&[1, 4, 0, b't', b'e', b's', b't'], Encoding::LittleEndian);
     assert_eq!(reader.read_tag().unwrap(), (1, "test".into()));

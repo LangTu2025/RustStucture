@@ -295,6 +295,54 @@ impl<'a> Reader<'a> {
             self.skip_bytes(count as usize * 8)
         }
     }
+    pub fn skip_list(&mut self) -> Result<()> {
+        let element_tag = self.byte()?;
+        if element_tag > 12 {
+            return Err(Error::invalid(format!("无效 NBT 列表元素标签 {element_tag}")));
+        }
+        let count = self.int()?;
+        if count < 0 {
+            return Err(Error::invalid("NBT 列表长度为负数"));
+        }
+        for _ in 0..count {
+            if element_tag == 0 {
+                continue;
+            }
+            self.skip_tag_value(element_tag)?;
+        }
+        Ok(())
+    }
+    pub fn skip_compound(&mut self) -> Result<()> {
+        loop {
+            let tag = self.byte()?;
+            if tag > 12 {
+                return Err(Error::invalid(format!("无效 NBT 标签 {tag}")));
+            }
+            if tag == 0 {
+                return Ok(());
+            }
+            self.skip_string()?;
+            self.skip_tag_value(tag)?;
+        }
+    }
+    pub fn skip_tag_value(&mut self, tag: u8) -> Result<()> {
+        match tag {
+            0 => Ok(()),
+            1 => self.skip_byte(),
+            2 => self.skip_short(),
+            3 => self.skip_int(),
+            4 => self.skip_long(),
+            5 => self.skip_float(),
+            6 => self.skip_double(),
+            7 => self.skip_byte_array(),
+            8 => self.skip_string(),
+            9 => self.skip_list(),
+            10 => self.skip_compound(),
+            11 => self.skip_int_array(),
+            12 => self.skip_long_array(),
+            _ => Err(Error::invalid(format!("无效 NBT 标签 {tag}"))),
+        }
+    }
     pub fn int(&mut self) -> Result<i32> {
         if self.encoding.net() {
             let mut value = 0u32;
