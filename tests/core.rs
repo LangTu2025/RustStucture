@@ -1252,6 +1252,109 @@ fn tag_writer_write_tag_compound_matches_go_nested_paths_and_depth_limit() {
 }
 
 #[test]
+fn nbt_encoder_matches_go_scalar_compound_tags_and_typed_empty_containers() {
+    use serde::Serialize;
+
+    #[derive(Serialize)]
+    struct Sample {
+        #[serde(rename = "Renamed")]
+        value: i32,
+        #[serde(skip_serializing_if = "nbt::is_default")]
+        omitted: i32,
+        list: nbt::TypedList<i32>,
+        bytes: [u8; 3],
+        empty_ints: nbt::TypedArray<i32>,
+        raw_bytes: Vec<u8>,
+    }
+
+    let sample = Sample {
+        value: 1,
+        omitted: 0,
+        list: nbt::TypedList::new(3, Vec::new()),
+        bytes: [1, 2, 3],
+        empty_ints: nbt::TypedArray::new(11, Vec::new()),
+        raw_bytes: vec![4, 5],
+    };
+    let mut bytes = Vec::new();
+    nbt::Encoder::new(&mut bytes).encode(&sample).unwrap();
+    assert_eq!(
+        bytes,
+        [
+            10, // Root compound tag.
+            0, // empty root name
+            3, 7, b'R', b'e', b'n', b'a', b'm', b'e', b'd', 2,
+            9, 4, b'l', b'i', b's', b't', 3, 0,
+            7, 5, b'b', b'y', b't', b'e', b's', 6, 1, 2, 3,
+            11, 10, b'e', b'm', b'p', b't', b'y', b'_', b'i', b'n', b't', b's', 0,
+            9, 9, b'r', b'a', b'w', b'_', b'b', b'y', b't', b'e', b's', 1, 4, 4, 5,
+            0,
+        ]
+    );
+
+    #[derive(Serialize)]
+    struct Root {
+        x: i32,
+    }
+    let mut network_big = Vec::new();
+    nbt::Encoder::with_encoding(&mut network_big, Encoding::NetworkBigEndian)
+        .encode(&Root { x: 1 })
+        .unwrap();
+    assert_eq!(network_big, [10, 3, 0, 1, b'x', 0, 0, 0, 1, 0]);
+
+    let mut default_writer = nbt::Encoder::new(Vec::new());
+    default_writer.encode(&true).unwrap();
+    default_writer.encode(&"x").unwrap();
+    assert_eq!(
+        default_writer.into_inner(),
+        [1, 0, 1, 8, 0, 1, b'x']
+    );
+
+    let mut empty_arrays = Vec::new();
+    let mut encoder = nbt::Encoder::new(&mut empty_arrays);
+    encoder
+        .encode(&nbt::TypedArray::<u8>::new(7, Vec::new()))
+        .unwrap();
+    encoder
+        .encode(&nbt::TypedArray::<i32>::new(11, Vec::new()))
+        .unwrap();
+    encoder
+        .encode(&nbt::TypedArray::<i64>::new(12, Vec::new()))
+        .unwrap();
+    encoder
+        .encode(&nbt::TypedList::<u8>::new(1, Vec::new()))
+        .unwrap();
+    assert_eq!(empty_arrays, [7, 0, 0, 11, 0, 0, 12, 0, 0, 9, 0, 1, 0]);
+
+    let mut invalid_key = Vec::new();
+    assert!(nbt::Encoder::new(&mut invalid_key)
+        .encode(&BTreeMap::from([(1i32, 2i32)]))
+        .unwrap_err()
+        .to_string()
+        .contains("NBT map key must be a string"));
+    let mut unsupported = Vec::new();
+    assert!(nbt::Encoder::new(&mut unsupported)
+        .encode(&1i8)
+        .unwrap_err()
+        .to_string()
+        .contains("int8"));
+    assert!(nbt::Encoder::new(Vec::new())
+        .encode(&'x')
+        .unwrap_err()
+        .to_string()
+        .contains("Rust char"));
+    #[derive(Serialize)]
+    struct Empty;
+    let mut empty_struct = Vec::new();
+    nbt::Encoder::new(&mut empty_struct).encode(&Empty).unwrap();
+    assert_eq!(empty_struct, [10, 0, 0]);
+    assert!(nbt::Encoder::new(Vec::new())
+        .encode(&())
+        .unwrap_err()
+        .to_string()
+        .contains("unit"));
+}
+
+#[test]
 fn tag_writer_write_tag_byte_appends_raw_byte_values() {
     let mut writer = nbt::Writer::new(Encoding::BigEndian);
     writer.write_tag_byte(0).unwrap();

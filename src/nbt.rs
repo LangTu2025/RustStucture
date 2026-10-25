@@ -4,6 +4,8 @@ use std::{
     collections::BTreeMap,
     io::{Cursor, Read},
 };
+mod encoder;
+pub use encoder::{Encoder, TypedArray, TypedList, is_default};
 pub type Compound = BTreeMap<String, Nbt>;
 pub type RawCompound = BTreeMap<Vec<u8>, Nbt>;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -663,6 +665,10 @@ pub struct OffsetWriter<S> {
 impl<S> OffsetWriter<S> {
     pub fn new(sink: S) -> Self {
         Self { sink, offset: 0 }
+    }
+
+    pub fn with_offset(sink: S, offset: u64) -> Self {
+        Self { sink, offset }
     }
 
     pub fn get_offset(&self) -> u64 {
@@ -1727,6 +1733,90 @@ impl Writer {
                     self.long(*value);
                 }
             }
+        }
+        Ok(())
+    }
+    fn write_encoded_root_to<S: TagWriteSink>(
+        &self,
+        writer: &mut OffsetWriter<S>,
+        value: &encoder::Value,
+    ) -> Result<()> {
+        self.write_tag_type_to(writer, value.tag())?;
+        if self.encoding != Encoding::NetworkBigEndian || value.tag() != 10 {
+            self.write_tag_string_to(writer, "")?;
+        }
+        self.write_encoded_payload_to(writer, value, 0)
+    }
+    fn write_encoded_payload_to<S: TagWriteSink>(
+        &self,
+        writer: &mut OffsetWriter<S>,
+        value: &encoder::Value,
+        depth: usize,
+    ) -> Result<()> {
+        match value {
+            encoder::Value::Byte(value) => self.write_tag_byte_to(writer, *value),
+            encoder::Value::Short(value) => self.write_tag_int16_to(writer, *value),
+            encoder::Value::Int(value) => self.write_tag_int32_to(writer, *value),
+            encoder::Value::Long(value) => self.write_tag_int64_to(writer, *value),
+            encoder::Value::Float(value) => self.write_tag_float32_to(writer, *value),
+            encoder::Value::Double(value) => self.write_tag_float64_to(writer, *value),
+            encoder::Value::ByteArray(values) => self.write_tag_byte_array_to(writer, values),
+            encoder::Value::String(value) => self.write_tag_string_to(writer, value),
+            encoder::Value::IntArray(values) => self.write_tag_int32_array_to(writer, values),
+            encoder::Value::LongArray(values) => self.write_tag_int64_array_to(writer, values),
+            encoder::Value::List(tag, values) => {
+                self.write_tag_type_to(writer, *tag)?;
+                self.write_tag_int32_to(writer, values.len() as i32)?;
+                for value in values {
+                    self.write_encoded_payload_to(writer, value, depth + 1)?;
+                }
+                Ok(())
+            }
+            encoder::Value::Compound(fields) => {
+                for (name, value) in fields {
+                    if depth + 1 >= 512 {
+                        return Err(Error::Other("nbt: 达到最大嵌套深度 512".into()));
+                    }
+                    self.write_tag_type_to(writer, value.tag())?;
+                    self.write_tag_string_to(writer, name)?;
+                    self.write_encoded_payload_to(writer, value, depth + 1)?;
+                }
+                self.write_single_byte_to(writer, 0, "WriteTagCompoundEnd")
+            }
+        }
+    }
+    fn write_tag_type_to<S: TagWriteSink>(
+        &self,
+        writer: &mut OffsetWriter<S>,
+        tag: u8,
+    ) -> Result<()> {
+        if tag > 12 {
+            return Err(Error::invalid(format!(
+                "nbt: 在偏移 {} 处的操作 'WriteTagType' 发现未知标签 '%!v(PANIC=String method: 未知标签)'",
+                writer.offset
+            )));
+        }
+        self.write_single_byte_to(writer, tag, "WriteTagType")
+    }
+    fn write_single_byte_to<S: TagWriteSink>(
+        &self,
+        writer: &mut OffsetWriter<S>,
+        value: u8,
+        op: &str,
+    ) -> Result<()> {
+        let (written, error) = writer.sink.write(&[value]);
+        writer.offset += written as u64;
+        if let Some(error) = error {
+            return Err(Error::Other(format!(
+                "nbt: 在偏移 {} 的操作 '{op}' 写入失败: {error}",
+                writer.offset
+            )));
+        }
+        if written != 1 {
+            return Err(Error::Other(format!(
+                "nbt: 在偏移 {} 的操作 '{op}' 写入失败: short write",
+                writer.offset
+            )));
         }
         Ok(())
     }
