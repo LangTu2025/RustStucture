@@ -1090,6 +1090,78 @@ fn tag_writer_write_tag_int16_to_matches_encodings_and_go_write_errors() {
 }
 
 #[test]
+fn tag_writer_write_tag_int32_to_matches_encodings_and_go_write_errors() {
+    struct ScriptedSink {
+        results: Vec<(usize, Option<std::io::Error>)>,
+        bytes: Vec<u8>,
+    }
+
+    impl nbt::TagWriteSink for ScriptedSink {
+        fn write(&mut self, bytes: &[u8]) -> (usize, Option<std::io::Error>) {
+            let (written, error) = self.results.remove(0);
+            self.bytes
+                .extend_from_slice(&bytes[..written.min(bytes.len())]);
+            (written, error)
+        }
+    }
+
+    for (encoding, expected) in [
+        (Encoding::LittleEndian, vec![0x34, 0x12, 0, 0]),
+        (Encoding::NetworkLittleEndian, vec![0xe8, 0x48]),
+        (Encoding::BigEndian, vec![0, 0, 0x12, 0x34]),
+        (Encoding::NetworkBigEndian, vec![0, 0, 0x12, 0x34]),
+    ] {
+        let mut writer = nbt::Writer::new(encoding);
+        writer.write_tag_int32(0x1234).unwrap();
+        assert_eq!(writer.data, expected);
+
+        let mut sink = nbt::OffsetWriter::new(nbt::IoWriteSink::new(Vec::new()));
+        writer.write_tag_int32_to(&mut sink, 0x1234).unwrap();
+        assert_eq!(sink.get_offset(), expected.len() as u64);
+        assert_eq!(sink.into_inner().into_inner(), expected);
+    }
+
+    let fixed = nbt::Writer::new(Encoding::BigEndian);
+    let mut fixed_short = nbt::OffsetWriter::new(ScriptedSink {
+        results: vec![(1, None)],
+        bytes: Vec::new(),
+    });
+    fixed
+        .write_tag_int32_to(&mut fixed_short, 0x1234)
+        .unwrap();
+    assert_eq!(fixed_short.get_offset(), 1);
+    assert_eq!(fixed_short.into_inner().bytes, [0]);
+
+    let mut fixed_error = nbt::OffsetWriter::new(ScriptedSink {
+        results: vec![(1, Some(std::io::Error::other("hidden by Go error")))],
+        bytes: Vec::new(),
+    });
+    assert_eq!(
+        fixed
+            .write_tag_int32_to(&mut fixed_error, 0x1234)
+            .unwrap_err()
+            .to_string(),
+        "nbt: 在偏移 1 的操作 'WriteInt32' 写入失败: <nil>"
+    );
+    assert_eq!(fixed_error.get_offset(), 1);
+
+    let network = nbt::Writer::new(Encoding::NetworkLittleEndian);
+    let mut network_error = nbt::OffsetWriter::new(ScriptedSink {
+        results: vec![(1, None), (0, Some(std::io::Error::other("hidden by Go error")))],
+        bytes: Vec::new(),
+    });
+    assert_eq!(
+        network
+            .write_tag_int32_to(&mut network_error, 0x1234)
+            .unwrap_err()
+            .to_string(),
+        "nbt: 在偏移 1 的操作 'WriteInt32' 写入失败: <nil>"
+    );
+    assert_eq!(network_error.get_offset(), 1);
+    assert_eq!(network_error.into_inner().bytes, [0xe8]);
+}
+
+#[test]
 fn tag_writer_rejects_mixed_type_list() {
     let value = Nbt::List(vec![Nbt::Byte(1), Nbt::Int(2)]);
     assert!(nbt::encode("", &value, Encoding::LittleEndian).is_err());

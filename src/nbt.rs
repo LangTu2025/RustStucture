@@ -744,6 +744,45 @@ impl Writer {
         }
         Ok(())
     }
+    pub fn write_tag_int32(&mut self, value: i32) -> Result<()> {
+        self.int(value);
+        Ok(())
+    }
+    pub fn write_tag_int32_to<S: TagWriteSink>(
+        &self,
+        writer: &mut OffsetWriter<S>,
+        value: i32,
+    ) -> Result<()> {
+        if self.encoding.net() {
+            let mut encoded = Self::new(self.encoding);
+            encoded.int(value);
+            for byte in encoded.data {
+                let (written, error) = writer.sink.write(&[byte]);
+                writer.offset += written as u64;
+                if error.is_some() || written != 1 {
+                    return Err(Error::Other(format!(
+                        "nbt: 在偏移 {} 的操作 'WriteInt32' 写入失败: <nil>",
+                        writer.offset
+                    )));
+                }
+            }
+        } else {
+            let bytes = if self.encoding.le() {
+                value.to_le_bytes()
+            } else {
+                value.to_be_bytes()
+            };
+            let (written, error) = writer.sink.write(&bytes);
+            writer.offset += written as u64;
+            if error.is_some() {
+                return Err(Error::Other(format!(
+                    "nbt: 在偏移 {} 的操作 'WriteInt32' 写入失败: <nil>",
+                    writer.offset
+                )));
+            }
+        }
+        Ok(())
+    }
     pub fn varuint(&mut self, mut n: u64) {
         while n >= 128 {
             self.data.push(n as u8 | 128);
