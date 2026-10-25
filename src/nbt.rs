@@ -244,6 +244,9 @@ impl<'a> Reader<'a> {
     pub fn skip_int(&mut self) -> Result<()> {
         self.skip_bytes(4)
     }
+    pub fn skip_float(&mut self) -> Result<()> {
+        self.skip_bytes(4)
+    }
     pub fn skip_long(&mut self) -> Result<()> {
         self.skip_bytes(8)
     }
