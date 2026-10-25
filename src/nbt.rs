@@ -267,6 +267,20 @@ impl<'a> Reader<'a> {
         }
         self.skip_bytes(length as usize)
     }
+    pub fn skip_int_array(&mut self) -> Result<()> {
+        let count = self.int()?;
+        if count < 0 {
+            panic!("runtime error: makeslice: len out of range");
+        }
+        if self.encoding.net() {
+            for _ in 0..count {
+                self.int()?;
+            }
+            Ok(())
+        } else {
+            self.skip_bytes(count as usize * 4)
+        }
+    }
     pub fn int(&mut self) -> Result<i32> {
         if self.encoding.net() {
             let mut value = 0u32;

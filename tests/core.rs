@@ -627,6 +627,34 @@ fn tag_reader_skip_tag_byte_array_handles_negative_zero_and_truncated_lengths() 
 }
 
 #[test]
+fn tag_reader_skip_tag_int32_array_matches_fixed_and_network_encodings() {
+    for (encoding, bytes) in [
+        (Encoding::LittleEndian, vec![2, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 0x43]),
+        (Encoding::BigEndian, vec![0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 2, 0x43]),
+        (Encoding::NetworkLittleEndian, vec![4, 2, 4, 0x43]),
+    ] {
+        let mut reader = nbt::Reader::new(&bytes, encoding);
+        reader.skip_int_array().unwrap();
+        assert_eq!(reader.byte().unwrap(), 0x43, "{encoding:?}");
+    }
+}
+
+#[test]
+fn tag_reader_skip_tag_int32_array_handles_negative_zero_and_truncation() {
+    let mut negative = nbt::Reader::new(&[0xff, 0xff, 0xff, 0xff], Encoding::LittleEndian);
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| negative.skip_int_array()));
+    assert!(panic.is_err());
+
+    let mut zero = nbt::Reader::new(&[0, 0, 0, 0, 0x43], Encoding::LittleEndian);
+    zero.skip_int_array().unwrap();
+    assert_eq!(zero.byte().unwrap(), 0x43);
+
+    let mut partial = nbt::Reader::new(&[2, 0, 0, 0, 1, 0, 0], Encoding::LittleEndian);
+    assert!(partial.skip_int_array().is_err());
+    assert_eq!(partial.pos, 7);
+}
+
+#[test]
 fn tag_reader_read_tag_and_end() {
     let mut reader = nbt::Reader::new(&[1, 4, 0, b't', b'e', b's', b't'], Encoding::LittleEndian);
     assert_eq!(reader.read_tag().unwrap(), (1, "test".into()));
