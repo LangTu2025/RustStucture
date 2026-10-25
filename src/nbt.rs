@@ -720,6 +720,30 @@ impl Writer {
         }
         Ok(())
     }
+    pub fn write_tag_int16(&mut self, value: i16) -> Result<()> {
+        self.short(value);
+        Ok(())
+    }
+    pub fn write_tag_int16_to<S: TagWriteSink>(
+        &self,
+        writer: &mut OffsetWriter<S>,
+        value: i16,
+    ) -> Result<()> {
+        let bytes = if self.encoding.le() {
+            value.to_le_bytes()
+        } else {
+            value.to_be_bytes()
+        };
+        let (written, error) = writer.sink.write(&bytes);
+        writer.offset += written as u64;
+        if let Some(error) = error {
+            return Err(Error::Other(format!(
+                "nbt: 在偏移 {} 的操作 'WriteInt16' 写入失败: {error}",
+                writer.offset
+            )));
+        }
+        Ok(())
+    }
     pub fn varuint(&mut self, mut n: u64) {
         while n >= 128 {
             self.data.push(n as u8 | 128);

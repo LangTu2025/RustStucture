@@ -1032,6 +1032,64 @@ fn tag_writer_write_tag_byte_to_tracks_success_short_write_and_errors() {
 }
 
 #[test]
+fn tag_writer_write_tag_int16_to_matches_encodings_and_go_write_errors() {
+    struct ScriptedSink {
+        result: Option<(usize, Option<std::io::Error>)>,
+        bytes: Vec<u8>,
+    }
+
+    impl nbt::TagWriteSink for ScriptedSink {
+        fn write(&mut self, bytes: &[u8]) -> (usize, Option<std::io::Error>) {
+            let (written, error) = self.result.take().unwrap();
+            self.bytes
+                .extend_from_slice(&bytes[..written.min(bytes.len())]);
+            (written, error)
+        }
+    }
+
+    for (encoding, expected) in [
+        (Encoding::LittleEndian, [0x34, 0x12]),
+        (Encoding::NetworkLittleEndian, [0x34, 0x12]),
+        (Encoding::BigEndian, [0x12, 0x34]),
+        (Encoding::NetworkBigEndian, [0x12, 0x34]),
+    ] {
+        let mut writer = nbt::Writer::new(encoding);
+        writer.write_tag_int16(0x1234).unwrap();
+        assert_eq!(writer.data, expected);
+
+        let mut sink = nbt::OffsetWriter::new(nbt::IoWriteSink::new(Vec::new()));
+        writer.write_tag_int16_to(&mut sink, 0x1234).unwrap();
+        assert_eq!(sink.get_offset(), 2);
+        assert_eq!(sink.into_inner().into_inner(), expected);
+    }
+
+    let writer = nbt::Writer::new(Encoding::BigEndian);
+    let mut short_without_error = nbt::OffsetWriter::new(ScriptedSink {
+        result: Some((1, None)),
+        bytes: Vec::new(),
+    });
+    writer
+        .write_tag_int16_to(&mut short_without_error, 0x1234)
+        .unwrap();
+    assert_eq!(short_without_error.get_offset(), 1);
+    assert_eq!(short_without_error.into_inner().bytes, [0x12]);
+
+    let mut partial_error = nbt::OffsetWriter::new(ScriptedSink {
+        result: Some((1, Some(std::io::Error::other("broken")))),
+        bytes: Vec::new(),
+    });
+    assert_eq!(
+        writer
+            .write_tag_int16_to(&mut partial_error, 0x1234)
+            .unwrap_err()
+            .to_string(),
+        "nbt: 在偏移 1 的操作 'WriteInt16' 写入失败: broken"
+    );
+    assert_eq!(partial_error.get_offset(), 1);
+    assert_eq!(partial_error.into_inner().bytes, [0x12]);
+}
+
+#[test]
 fn tag_writer_rejects_mixed_type_list() {
     let value = Nbt::List(vec![Nbt::Byte(1), Nbt::Int(2)]);
     assert!(nbt::encode("", &value, Encoding::LittleEndian).is_err());
