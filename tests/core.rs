@@ -749,6 +749,37 @@ fn tag_reader_skip_tag_compound_rejects_unknown_and_truncation() {
 }
 
 #[test]
+fn tag_reader_skip_tag_value_dispatches_every_tag_without_consuming_sentinel() {
+    let cases: Vec<(u8, Vec<u8>)> = vec![
+        (1, vec![0x42]),
+        (2, vec![1, 2]),
+        (3, vec![1, 2, 3, 4]),
+        (4, vec![1, 2, 3, 4, 5, 6, 7, 8]),
+        (5, vec![1, 2, 3, 4]),
+        (6, vec![1, 2, 3, 4, 5, 6, 7, 8]),
+        (7, vec![2, 0, 0, 0, 0xaa, 0xbb]),
+        (8, vec![2, 0, b'H', b'i']),
+        (9, vec![1, 1, 0, 0, 0, 0x42]),
+        (10, vec![0]),
+        (11, vec![1, 0, 0, 0, 1, 0, 0, 0]),
+        (12, vec![1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0]),
+    ];
+    for (tag, mut payload) in cases {
+        payload.push(0x99);
+        let mut reader = nbt::Reader::new(&payload, Encoding::LittleEndian);
+        reader.skip_tag_value(tag).unwrap_or_else(|error| panic!("tag {tag}: {error}"));
+        assert_eq!(reader.byte().unwrap(), 0x99, "tag {tag}");
+    }
+
+    let mut end = nbt::Reader::new(&[0x99], Encoding::LittleEndian);
+    end.skip_tag_value(0).unwrap();
+    assert_eq!(end.pos, 0);
+
+    let mut unknown = nbt::Reader::new(&[], Encoding::LittleEndian);
+    assert!(unknown.skip_tag_value(13).is_err());
+}
+
+#[test]
 fn tag_reader_read_tag_and_end() {
     let mut reader = nbt::Reader::new(&[1, 4, 0, b't', b'e', b's', b't'], Encoding::LittleEndian);
     assert_eq!(reader.read_tag().unwrap(), (1, "test".into()));
