@@ -960,6 +960,15 @@ fn tag_writer_write_tag_type_validates_and_writes_tag_byte() {
 }
 
 #[test]
+fn tag_writer_write_tag_byte_appends_raw_byte_values() {
+    let mut writer = nbt::Writer::new(Encoding::BigEndian);
+    writer.write_tag_byte(0).unwrap();
+    writer.write_tag_byte(0x7f).unwrap();
+    writer.write_tag_byte(0xff).unwrap();
+    assert_eq!(writer.data, [0, 0x7f, 0xff]);
+}
+
+#[test]
 fn tag_writer_rejects_mixed_type_list() {
     let value = Nbt::List(vec![Nbt::Byte(1), Nbt::Int(2)]);
     assert!(nbt::encode("", &value, Encoding::LittleEndian).is_err());

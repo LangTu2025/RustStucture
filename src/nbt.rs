@@ -650,6 +650,10 @@ impl Writer {
         self.data.push(tag);
         Ok(())
     }
+    pub fn write_tag_byte(&mut self, value: u8) -> Result<()> {
+        self.data.push(value);
+        Ok(())
+    }
     pub fn varuint(&mut self, mut n: u64) {
         while n >= 128 {
             self.data.push(n as u8 | 128);
