@@ -717,6 +717,38 @@ fn tag_reader_skip_tag_list_rejects_invalid_and_negative_and_propagates_truncati
 }
 
 #[test]
+fn tag_reader_skip_tag_compound_handles_end_nested_and_sentinel() {
+    let bytes = [1, 1, 0, b'x', 0x42, 0, 0x99];
+    let mut reader = nbt::Reader::new(&bytes, Encoding::LittleEndian);
+    reader.skip_compound().unwrap();
+    assert_eq!(reader.byte().unwrap(), 0x99);
+
+    let nested = [10, 1, 0, b'n', 1, 1, 0, b'x', 0x42, 0, 0, 0x99];
+    let mut reader = nbt::Reader::new(&nested, Encoding::LittleEndian);
+    reader.skip_compound().unwrap();
+    assert_eq!(reader.byte().unwrap(), 0x99);
+
+    let mut end = nbt::Reader::new(&[0, 0x99], Encoding::LittleEndian);
+    end.skip_compound().unwrap();
+    assert_eq!(end.byte().unwrap(), 0x99);
+}
+
+#[test]
+fn tag_reader_skip_tag_compound_rejects_unknown_and_truncation() {
+    let mut invalid = nbt::Reader::new(&[13, 0, 0, 0, 0], Encoding::LittleEndian);
+    assert!(invalid.skip_compound().is_err());
+    assert_eq!(invalid.pos, 1);
+
+    let mut name = nbt::Reader::new(&[1, 2, 0, b'x'], Encoding::LittleEndian);
+    assert!(name.skip_compound().is_err());
+    assert_eq!(name.pos, 4);
+
+    let mut value = nbt::Reader::new(&[1, 1, 0, b'x'], Encoding::LittleEndian);
+    assert!(value.skip_compound().is_err());
+    assert_eq!(value.pos, 5);
+}
+
+#[test]
 fn tag_reader_read_tag_and_end() {
     let mut reader = nbt::Reader::new(&[1, 4, 0, b't', b'e', b's', b't'], Encoding::LittleEndian);
     assert_eq!(reader.read_tag().unwrap(), (1, "test".into()));
