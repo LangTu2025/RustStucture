@@ -1253,6 +1253,70 @@ fn tag_writer_write_tag_int64_to_matches_encodings_and_go_write_errors() {
 }
 
 #[test]
+fn tag_writer_write_tag_float32_to_preserves_bits_encodings_and_go_errors() {
+    struct ScriptedSink {
+        result: Option<(usize, Option<std::io::Error>)>,
+        bytes: Vec<u8>,
+    }
+
+    impl nbt::TagWriteSink for ScriptedSink {
+        fn write(&mut self, bytes: &[u8]) -> (usize, Option<std::io::Error>) {
+            let (written, error) = self.result.take().unwrap();
+            self.bytes
+                .extend_from_slice(&bytes[..written.min(bytes.len())]);
+            (written, error)
+        }
+    }
+
+    let value = f32::from_bits(0x7fc0_1234);
+    for (encoding, expected) in [
+        (Encoding::LittleEndian, vec![0x34, 0x12, 0xc0, 0x7f]),
+        (
+            Encoding::NetworkLittleEndian,
+            vec![0x34, 0x12, 0xc0, 0x7f],
+        ),
+        (Encoding::BigEndian, vec![0x7f, 0xc0, 0x12, 0x34]),
+        (
+            Encoding::NetworkBigEndian,
+            vec![0x7f, 0xc0, 0x12, 0x34],
+        ),
+    ] {
+        let mut writer = nbt::Writer::new(encoding);
+        writer.write_tag_float32(value).unwrap();
+        assert_eq!(writer.data, expected);
+
+        let mut sink = nbt::OffsetWriter::new(nbt::IoWriteSink::new(Vec::new()));
+        writer.write_tag_float32_to(&mut sink, value).unwrap();
+        assert_eq!(sink.get_offset(), 4);
+        assert_eq!(sink.into_inner().into_inner(), expected);
+    }
+
+    let writer = nbt::Writer::new(Encoding::BigEndian);
+    let mut short_without_error = nbt::OffsetWriter::new(ScriptedSink {
+        result: Some((2, None)),
+        bytes: Vec::new(),
+    });
+    writer
+        .write_tag_float32_to(&mut short_without_error, value)
+        .unwrap();
+    assert_eq!(short_without_error.get_offset(), 2);
+    assert_eq!(short_without_error.into_inner().bytes, [0x7f, 0xc0]);
+
+    let mut partial_error = nbt::OffsetWriter::new(ScriptedSink {
+        result: Some((2, Some(std::io::Error::other("hidden by Go error")))),
+        bytes: Vec::new(),
+    });
+    assert_eq!(
+        writer
+            .write_tag_float32_to(&mut partial_error, value)
+            .unwrap_err()
+            .to_string(),
+        "nbt: 在偏移 2 的操作 'WriteFloat32' 写入失败: <nil>"
+    );
+    assert_eq!(partial_error.get_offset(), 2);
+}
+
+#[test]
 fn tag_writer_rejects_mixed_type_list() {
     let value = Nbt::List(vec![Nbt::Byte(1), Nbt::Int(2)]);
     assert!(nbt::encode("", &value, Encoding::LittleEndian).is_err());
