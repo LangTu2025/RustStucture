@@ -1090,6 +1090,91 @@ impl Writer {
         }
         Ok(())
     }
+    pub fn write_tag_int64_array(&mut self, data: &[i64]) -> Result<()> {
+        if data.len() > i32::MAX as usize {
+            return Err(Error::Other(format!(
+                "nbt: 在偏移 {} 的操作 'WriteTagInt64Array' 写入失败: int64 数组长度 {} 超过最大值 {}",
+                self.data.len(),
+                data.len(),
+                i32::MAX
+            )));
+        }
+        self.int(data.len() as i32);
+        for value in data {
+            self.long(*value);
+        }
+        Ok(())
+    }
+    pub fn write_tag_int64_array_to<S: TagWriteSink>(
+        &self,
+        writer: &mut OffsetWriter<S>,
+        data: &[i64],
+    ) -> Result<()> {
+        if data.len() > i32::MAX as usize {
+            return Err(Error::Other(format!(
+                "nbt: 在偏移 {} 的操作 'WriteTagInt64Array' 写入失败: int64 数组长度 {} 超过最大值 {}",
+                writer.offset,
+                data.len(),
+                i32::MAX
+            )));
+        }
+        let mut length_writer = Self::new(self.encoding);
+        length_writer.int(data.len() as i32);
+        if self.encoding.net() {
+            for byte in length_writer.data {
+                let (written, error) = writer.sink.write(&[byte]);
+                writer.offset += written as u64;
+                if error.is_some() || written != 1 {
+                    return Err(Error::Other(format!(
+                        "nbt: 在偏移 {} 的操作 'WriteInt32' 写入失败: <nil>",
+                        writer.offset
+                    )));
+                }
+            }
+        } else {
+            let (written, error) = writer.sink.write(&length_writer.data);
+            writer.offset += written as u64;
+            if error.is_some() {
+                return Err(Error::Other(format!(
+                    "nbt: 在偏移 {} 的操作 'WriteInt32' 写入失败: <nil>",
+                    writer.offset
+                )));
+            }
+        }
+        for value in data {
+            let encoded = if self.encoding.net() {
+                let mut temporary = Self::new(self.encoding);
+                temporary.long(*value);
+                temporary.data
+            } else if self.encoding.le() {
+                value.to_le_bytes().to_vec()
+            } else {
+                value.to_be_bytes().to_vec()
+            };
+            if self.encoding.net() {
+                for byte in encoded {
+                    let (written, error) = writer.sink.write(&[byte]);
+                    writer.offset += written as u64;
+                    if error.is_some() || written != 1 {
+                        return Err(Error::Other(format!(
+                            "nbt: 在偏移 {} 的操作 'WriteInt64' 写入失败: <nil>",
+                            writer.offset
+                        )));
+                    }
+                }
+            } else {
+                let (written, error) = writer.sink.write(&encoded);
+                writer.offset += written as u64;
+                if error.is_some() {
+                    return Err(Error::Other(format!(
+                        "nbt: 在偏移 {} 的操作 'WriteInt64' 写入失败: <nil>",
+                        writer.offset
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
     pub fn varuint(&mut self, mut n: u64) {
         while n >= 128 {
             self.data.push(n as u8 | 128);
