@@ -1387,6 +1387,77 @@ fn tag_writer_write_tag_float64_to_preserves_bits_encodings_and_go_errors() {
 }
 
 #[test]
+fn tag_writer_write_tag_string_matches_go_lengths_bytes_and_sink_errors() {
+    struct ScriptedSink {
+        results: Vec<(usize, Option<std::io::Error>)>,
+        bytes: Vec<u8>,
+    }
+
+    impl nbt::TagWriteSink for ScriptedSink {
+        fn write(&mut self, bytes: &[u8]) -> (usize, Option<std::io::Error>) {
+            let (written, error) = self.results.remove(0);
+            self.bytes
+                .extend_from_slice(&bytes[..written.min(bytes.len())]);
+            (written, error)
+        }
+    }
+
+    for (encoding, expected) in [
+        (Encoding::LittleEndian, vec![2, 0, 0xc3, 0xa9]),
+        (Encoding::NetworkLittleEndian, vec![2, 0xc3, 0xa9]),
+        (Encoding::BigEndian, vec![0, 2, 0xc3, 0xa9]),
+        (Encoding::NetworkBigEndian, vec![0, 2, 0xc3, 0xa9]),
+    ] {
+        let mut writer = nbt::Writer::new(encoding);
+        writer.write_tag_string("é").unwrap();
+        assert_eq!(writer.data, expected);
+
+        let mut sink = nbt::OffsetWriter::new(nbt::IoWriteSink::new(Vec::new()));
+        writer.write_tag_string_to(&mut sink, "é").unwrap();
+        assert_eq!(sink.get_offset(), expected.len() as u64);
+        assert_eq!(sink.into_inner().into_inner(), expected);
+    }
+
+    let mut too_long = nbt::Writer::new(Encoding::LittleEndian);
+    assert_eq!(
+        too_long.write_tag_string(&"x".repeat(32768)).unwrap_err().to_string(),
+        "nbt: 偏移 0 的字符串无效: 字符串长度超过最大限制（长度=32768）"
+    );
+    assert!(too_long.data.is_empty());
+
+    let writer = nbt::Writer::new(Encoding::BigEndian);
+    let mut prefix_error = nbt::OffsetWriter::new(ScriptedSink {
+        results: vec![(1, Some(std::io::Error::other("ignored by Go wrapper")))],
+        bytes: Vec::new(),
+    });
+    assert_eq!(
+        writer
+            .write_tag_string_to(&mut prefix_error, "é")
+            .unwrap_err()
+            .to_string(),
+        "nbt: 在偏移 1 的操作 'WriteString' 写入失败: <nil>"
+    );
+    assert_eq!(prefix_error.get_offset(), 1);
+
+    let mut payload_error = nbt::OffsetWriter::new(ScriptedSink {
+        results: vec![
+            (2, None),
+            (1, Some(std::io::Error::other("payload failed"))),
+        ],
+        bytes: Vec::new(),
+    });
+    assert_eq!(
+        writer
+            .write_tag_string_to(&mut payload_error, "é")
+            .unwrap_err()
+            .to_string(),
+        "nbt: 在偏移 3 的操作 'WriteString' 写入失败: payload failed"
+    );
+    assert_eq!(payload_error.get_offset(), 3);
+    assert_eq!(payload_error.into_inner().bytes, [0, 2, 0xc3]);
+}
+
+#[test]
 fn tag_writer_rejects_mixed_type_list() {
     let value = Nbt::List(vec![Nbt::Byte(1), Nbt::Int(2)]);
     assert!(nbt::encode("", &value, Encoding::LittleEndian).is_err());

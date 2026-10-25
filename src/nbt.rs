@@ -882,6 +882,77 @@ impl Writer {
         }
         Ok(())
     }
+    pub fn write_tag_string(&mut self, value: &str) -> Result<()> {
+        if value.len() > i16::MAX as usize {
+            return Err(Error::Other(format!(
+                "nbt: 偏移 {} 的字符串无效: 字符串长度超过最大限制（长度={}）",
+                self.data.len(),
+                value.len()
+            )));
+        }
+        if self.encoding.net() {
+            self.varuint(value.len() as u64);
+        } else {
+            self.short(value.len() as i16);
+        }
+        self.data.extend_from_slice(value.as_bytes());
+        Ok(())
+    }
+    pub fn write_tag_string_to<S: TagWriteSink>(
+        &self,
+        writer: &mut OffsetWriter<S>,
+        value: &str,
+    ) -> Result<()> {
+        if value.len() > i16::MAX as usize {
+            return Err(Error::Other(format!(
+                "nbt: 偏移 {} 的字符串无效: 字符串长度超过最大限制（长度={}）",
+                writer.offset,
+                value.len()
+            )));
+        }
+        let length = value.len();
+        let length_bytes = if self.encoding.net() {
+            let mut prefix = Self::new(self.encoding);
+            prefix.varuint(length as u64);
+            prefix.data
+        } else if self.encoding.le() {
+            (length as i16).to_le_bytes().to_vec()
+        } else {
+            (length as i16).to_be_bytes().to_vec()
+        };
+        if self.encoding.net() {
+            for byte in length_bytes {
+                let (written, error) = writer.sink.write(&[byte]);
+                writer.offset += written as u64;
+                if error.is_some() || written != 1 {
+                    return Err(Error::Other(format!(
+                        "nbt: 在偏移 {} 的操作 'WriteString' 写入失败: <nil>",
+                        writer.offset
+                    )));
+                }
+            }
+        } else {
+            let (written, error) = writer.sink.write(&length_bytes);
+            writer.offset += written as u64;
+            if error.is_some() {
+                return Err(Error::Other(format!(
+                    "nbt: 在偏移 {} 的操作 'WriteString' 写入失败: <nil>",
+                    writer.offset
+                )));
+            }
+        }
+        if !value.is_empty() {
+            let (written, error) = writer.sink.write(value.as_bytes());
+            writer.offset += written as u64;
+            if let Some(error) = error {
+                return Err(Error::Other(format!(
+                    "nbt: 在偏移 {} 的操作 'WriteString' 写入失败: {error}",
+                    writer.offset
+                )));
+            }
+        }
+        Ok(())
+    }
     pub fn varuint(&mut self, mut n: u64) {
         while n >= 128 {
             self.data.push(n as u8 | 128);
