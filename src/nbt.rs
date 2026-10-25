@@ -250,6 +250,9 @@ impl<'a> Reader<'a> {
     pub fn skip_long(&mut self) -> Result<()> {
         self.skip_bytes(8)
     }
+    pub fn skip_double(&mut self) -> Result<()> {
+        self.skip_bytes(8)
+    }
     pub fn int(&mut self) -> Result<i32> {
         if self.encoding.net() {
             let mut value = 0u32;
