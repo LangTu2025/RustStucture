@@ -1036,6 +1036,52 @@ fn tag_writer_write_tag_matches_go_header_rules_and_sink_errors() {
 }
 
 #[test]
+fn tag_writer_write_tag_value_dispatches_go_types_and_errors() {
+    let cases = [
+        (1, Nbt::Byte(-1), vec![0xff]),
+        (2, Nbt::Short(-2), vec![0xfe, 0xff]),
+        (3, Nbt::Int(1), vec![1, 0, 0, 0]),
+        (4, Nbt::Long(-1), vec![0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]),
+        (5, Nbt::Float(1.5), 1.5f32.to_le_bytes().to_vec()),
+        (6, Nbt::Double(2.5), 2.5f64.to_le_bytes().to_vec()),
+        (7, Nbt::ByteArray(vec![3]), vec![1, 0, 0, 0, 3]),
+        (8, Nbt::String("x".into()), vec![1, 0, b'x']),
+        (9, Nbt::List(vec![Nbt::Int(1)]), vec![3, 1, 0, 0, 0, 1, 0, 0, 0]),
+        (10, Nbt::Compound(BTreeMap::new()), vec![0]),
+        (11, Nbt::IntArray(vec![2]), vec![1, 0, 0, 0, 2, 0, 0, 0]),
+        (12, Nbt::LongArray(vec![2]), vec![1, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0]),
+    ];
+    for (tag, value, expected) in cases {
+        let mut writer = nbt::Writer::new(Encoding::LittleEndian);
+        writer.write_tag_value(tag, &value).unwrap();
+        assert_eq!(writer.data, expected, "tag {tag}");
+    }
+
+    let mut end = nbt::Writer::new(Encoding::LittleEndian);
+    end.write_tag_value(0, &Nbt::String("ignored".into())).unwrap();
+    assert!(end.data.is_empty());
+
+    let mut mismatch = nbt::Writer::new(Encoding::LittleEndian);
+    assert_eq!(
+        mismatch
+            .write_tag_value(3, &Nbt::String("x".into()))
+            .unwrap_err()
+            .to_string(),
+        "nbt: 值类型 string（）无法转换为 NBT 标签"
+    );
+    assert!(mismatch.data.is_empty());
+
+    let mut unknown = nbt::Writer::new(Encoding::LittleEndian);
+    assert_eq!(
+        unknown
+            .write_tag_value(13, &Nbt::Int(1))
+            .unwrap_err()
+            .to_string(),
+        "nbt: 在偏移 0 处的操作 'WriteTagValue' 发现未知标签 '%!v(PANIC=String method: 未知标签)'"
+    );
+}
+
+#[test]
 fn tag_writer_write_tag_byte_appends_raw_byte_values() {
     let mut writer = nbt::Writer::new(Encoding::BigEndian);
     writer.write_tag_byte(0).unwrap();

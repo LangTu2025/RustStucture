@@ -702,6 +702,39 @@ impl Writer {
         }
         self.write_tag_string(name)
     }
+    pub fn write_tag_value(&mut self, tag: u8, value: &Nbt) -> Result<()> {
+        if tag == 0 {
+            return Ok(());
+        }
+        if tag > 12 {
+            return Err(Error::invalid(format!(
+                "nbt: 在偏移 {} 处的操作 'WriteTagValue' 发现未知标签 '%!v(PANIC=String method: 未知标签)'",
+                self.data.len()
+            )));
+        }
+        if tag != value.tag() {
+            let value_type = match value {
+                Nbt::End => "<nil>",
+                Nbt::Byte(_) => "uint8",
+                Nbt::Short(_) => "int16",
+                Nbt::Int(_) => "int32",
+                Nbt::Long(_) => "int64",
+                Nbt::Float(_) => "float32",
+                Nbt::Double(_) => "float64",
+                Nbt::ByteArray(_) => "[]uint8",
+                Nbt::String(_) | Nbt::RawString(_) => "string",
+                Nbt::List(_) => "[]interface {}",
+                Nbt::Compound(_) | Nbt::RawCompound(_) => "map[string]interface {}",
+                Nbt::IntArray(_) => "[]int32",
+                Nbt::LongArray(_) => "[]int64",
+            };
+            return Err(Error::invalid(format!(
+                "nbt: 值类型 {value_type}（{}）无法转换为 NBT 标签",
+                ""
+            )));
+        }
+        self.value(value)
+    }
     pub fn write_tag_to<S: TagWriteSink>(
         &self,
         writer: &mut OffsetWriter<S>,
