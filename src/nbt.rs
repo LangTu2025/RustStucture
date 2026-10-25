@@ -260,6 +260,13 @@ impl<'a> Reader<'a> {
         }
         self.skip_bytes(length as usize)
     }
+    pub fn skip_byte_array(&mut self) -> Result<()> {
+        let length = self.int()?;
+        if length < 0 {
+            return Err(Error::invalid("NBT 字节数组长度为负数"));
+        }
+        self.skip_bytes(length as usize)
+    }
     pub fn int(&mut self) -> Result<i32> {
         if self.encoding.net() {
             let mut value = 0u32;
