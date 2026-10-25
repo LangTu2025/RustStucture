@@ -1176,6 +1176,82 @@ fn tag_writer_write_tag_list_matches_go_types_partial_output_and_depth_limit() {
 }
 
 #[test]
+fn tag_writer_write_tag_compound_matches_go_nested_paths_and_depth_limit() {
+    let value = BTreeMap::from([
+        ("a".into(), Nbt::Int(1)),
+        (
+            "b".into(),
+            Nbt::Compound(BTreeMap::from([("nested".into(), Nbt::String("x".into()))])),
+        ),
+    ]);
+    for encoding in [
+        Encoding::LittleEndian,
+        Encoding::BigEndian,
+        Encoding::NetworkLittleEndian,
+        Encoding::NetworkBigEndian,
+    ] {
+        let mut writer = nbt::Writer::new(encoding);
+        writer.write_tag_compound(&value).unwrap();
+        let mut sink = nbt::OffsetWriter::new(nbt::IoWriteSink::new(Vec::new()));
+        nbt::Writer::new(encoding)
+            .write_tag_compound_to(&mut sink, &value)
+            .unwrap();
+        assert_eq!(sink.into_inner().into_inner(), writer.data, "{encoding:?}");
+    }
+
+    let mut invalid = BTreeMap::new();
+    invalid.insert("a".into(), Nbt::Int(1));
+    invalid.insert("b".into(), Nbt::End);
+    let mut writer = nbt::Writer::new(Encoding::LittleEndian);
+    assert_eq!(
+        writer.write_tag_compound(&invalid).unwrap_err().to_string(),
+        "nbt: 值类型 <nil>（b）无法转换为 NBT 标签"
+    );
+    assert_eq!(writer.data, [3, 1, 0, b'a', 1, 0, 0, 0]);
+    let mut invalid_sink = nbt::OffsetWriter::new(nbt::IoWriteSink::new(Vec::new()));
+    assert_eq!(
+        nbt::Writer::new(Encoding::LittleEndian)
+            .write_tag_compound_to(&mut invalid_sink, &invalid)
+            .unwrap_err()
+            .to_string(),
+        "nbt: 值类型 <nil>（b）无法转换为 NBT 标签"
+    );
+    assert_eq!(invalid_sink.get_offset(), 8);
+    assert_eq!(
+        invalid_sink.into_inner().into_inner(),
+        [3, 1, 0, b'a', 1, 0, 0, 0]
+    );
+
+    let nested_invalid = Nbt::Compound(BTreeMap::from([("bad".into(), Nbt::End)]));
+    let nested_list = [Nbt::List(vec![nested_invalid])];
+    let mut writer = nbt::Writer::new(Encoding::LittleEndian);
+    assert_eq!(
+        writer.write_tag_list(&nested_list).unwrap_err().to_string(),
+        "nbt: 值类型 <nil>（列表[0][0].bad）无法转换为 NBT 标签"
+    );
+
+    let mut accepted = BTreeMap::from([("leaf".into(), Nbt::Int(1))]);
+    for _ in 0..511 {
+        accepted = BTreeMap::from([("x".into(), Nbt::Compound(accepted))]);
+    }
+    nbt::Writer::new(Encoding::LittleEndian)
+        .write_tag_compound(&accepted)
+        .unwrap();
+
+    let mut too_deep = BTreeMap::from([("leaf".into(), Nbt::Int(1))]);
+    for _ in 0..512 {
+        too_deep = BTreeMap::from([("x".into(), Nbt::Compound(too_deep))]);
+    }
+    assert_eq!(
+        nbt::Writer::new(Encoding::LittleEndian)
+            .write_tag_compound(&too_deep)
+            .unwrap_err()
+            .to_string(),
+        "nbt: 达到最大嵌套深度 512"
+    );
+}
+
+#[test]
 fn tag_writer_write_tag_byte_appends_raw_byte_values() {
     let mut writer = nbt::Writer::new(Encoding::BigEndian);
     writer.write_tag_byte(0).unwrap();
