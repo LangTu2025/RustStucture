@@ -1458,6 +1458,92 @@ fn tag_writer_write_tag_string_matches_go_lengths_bytes_and_sink_errors() {
 }
 
 #[test]
+fn tag_writer_write_tag_byte_array_matches_go_prefix_payload_and_errors() {
+    struct ScriptedSink {
+        results: Vec<(usize, Option<std::io::Error>)>,
+        bytes: Vec<u8>,
+    }
+
+    impl nbt::TagWriteSink for ScriptedSink {
+        fn write(&mut self, bytes: &[u8]) -> (usize, Option<std::io::Error>) {
+            let (written, error) = self.results.remove(0);
+            self.bytes
+                .extend_from_slice(&bytes[..written.min(bytes.len())]);
+            (written, error)
+        }
+    }
+
+    for (encoding, expected) in [
+        (Encoding::LittleEndian, vec![3, 0, 0, 0, 0x11, 0x22, 0x33]),
+        (Encoding::NetworkLittleEndian, vec![6, 0x11, 0x22, 0x33]),
+        (Encoding::BigEndian, vec![0, 0, 0, 3, 0x11, 0x22, 0x33]),
+        (
+            Encoding::NetworkBigEndian,
+            vec![0, 0, 0, 3, 0x11, 0x22, 0x33],
+        ),
+    ] {
+        let mut writer = nbt::Writer::new(encoding);
+        writer.write_tag_byte_array(&[0x11, 0x22, 0x33]).unwrap();
+        assert_eq!(writer.data, expected);
+
+        let mut sink = nbt::OffsetWriter::new(nbt::IoWriteSink::new(Vec::new()));
+        writer
+            .write_tag_byte_array_to(&mut sink, &[0x11, 0x22, 0x33])
+            .unwrap();
+        assert_eq!(sink.get_offset(), expected.len() as u64);
+        assert_eq!(sink.into_inner().into_inner(), expected);
+    }
+
+    let mut empty = nbt::Writer::new(Encoding::LittleEndian);
+    empty.write_tag_byte_array(&[]).unwrap();
+    assert_eq!(empty.data, [0, 0, 0, 0]);
+
+    let writer = nbt::Writer::new(Encoding::BigEndian);
+    let mut prefix_error = nbt::OffsetWriter::new(ScriptedSink {
+        results: vec![(2, Some(std::io::Error::other("ignored by Go error")))],
+        bytes: Vec::new(),
+    });
+    assert_eq!(
+        writer
+            .write_tag_byte_array_to(&mut prefix_error, &[0x11])
+            .unwrap_err()
+            .to_string(),
+        "nbt: 在偏移 2 的操作 'WriteInt32' 写入失败: <nil>"
+    );
+    assert_eq!(prefix_error.get_offset(), 2);
+
+    let mut payload_short = nbt::OffsetWriter::new(ScriptedSink {
+        results: vec![(4, None), (1, None)],
+        bytes: Vec::new(),
+    });
+    assert_eq!(
+        writer
+            .write_tag_byte_array_to(&mut payload_short, &[0x11, 0x22, 0x33])
+            .unwrap_err()
+            .to_string(),
+        "nbt: 在偏移 5 的操作 'WriteTagByteArray' 写入失败: short write"
+    );
+    assert_eq!(payload_short.get_offset(), 5);
+    assert_eq!(payload_short.into_inner().bytes, [0, 0, 0, 3, 0x11]);
+
+    let mut payload_error = nbt::OffsetWriter::new(ScriptedSink {
+        results: vec![
+            (4, None),
+            (2, Some(std::io::Error::other("payload failed"))),
+        ],
+        bytes: Vec::new(),
+    });
+    assert_eq!(
+        writer
+            .write_tag_byte_array_to(&mut payload_error, &[0x11, 0x22, 0x33])
+            .unwrap_err()
+            .to_string(),
+        "nbt: 在偏移 6 的操作 'WriteTagByteArray' 写入失败: payload failed"
+    );
+    assert_eq!(payload_error.get_offset(), 6);
+}
+
+#[test]
 fn tag_writer_rejects_mixed_type_list() {
     let value = Nbt::List(vec![Nbt::Byte(1), Nbt::Int(2)]);
     assert!(nbt::encode("", &value, Encoding::LittleEndian).is_err());
