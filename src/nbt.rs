@@ -343,6 +343,17 @@ impl<'a> Reader<'a> {
             _ => Err(Error::invalid(format!("无效 NBT 标签 {tag}"))),
         }
     }
+    pub fn skip_tag(&mut self) -> Result<()> {
+        let tag = self.byte()?;
+        if tag > 12 {
+            return Err(Error::invalid(format!("无效 NBT 标签 {tag}")));
+        }
+        if tag == 0 {
+            return Ok(());
+        }
+        self.skip_string()?;
+        self.skip_tag_value(tag)
+    }
     pub fn int(&mut self) -> Result<i32> {
         if self.encoding.net() {
             let mut value = 0u32;

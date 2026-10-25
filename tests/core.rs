@@ -780,6 +780,38 @@ fn tag_reader_skip_tag_value_dispatches_every_tag_without_consuming_sentinel() {
 }
 
 #[test]
+fn tag_reader_skip_tag_handles_named_value_end_and_sentinel() {
+    let bytes = [1, 1, 0, b'x', 0x42, 0, 0x99];
+    let mut reader = nbt::Reader::new(&bytes, Encoding::LittleEndian);
+    reader.skip_tag().unwrap();
+    reader.skip_tag().unwrap();
+    assert_eq!(reader.byte().unwrap(), 0x99);
+
+    let mut end = nbt::Reader::new(&[0, 0x99], Encoding::LittleEndian);
+    end.skip_tag().unwrap();
+    assert_eq!(end.byte().unwrap(), 0x99);
+}
+
+#[test]
+fn tag_reader_skip_tag_rejects_unknown_eof_and_truncation() {
+    let mut unknown = nbt::Reader::new(&[13, 1, 0, b'x'], Encoding::LittleEndian);
+    assert!(unknown.skip_tag().is_err());
+    assert_eq!(unknown.pos, 1);
+
+    let mut empty = nbt::Reader::new(&[], Encoding::LittleEndian);
+    assert!(empty.skip_tag().is_err());
+    assert_eq!(empty.pos, 1);
+
+    let mut name = nbt::Reader::new(&[1, 2, 0, b'x'], Encoding::LittleEndian);
+    assert!(name.skip_tag().is_err());
+    assert_eq!(name.pos, 4);
+
+    let mut value = nbt::Reader::new(&[1, 1, 0, b'x'], Encoding::LittleEndian);
+    assert!(value.skip_tag().is_err());
+    assert_eq!(value.pos, 5);
+}
+
+#[test]
 fn tag_reader_read_tag_and_end() {
     let mut reader = nbt::Reader::new(&[1, 4, 0, b't', b'e', b's', b't'], Encoding::LittleEndian);
     assert_eq!(reader.read_tag().unwrap(), (1, "test".into()));
