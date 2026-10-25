@@ -191,6 +191,9 @@ impl<'a> Reader<'a> {
             Error::Io(std::io::Error::from(std::io::ErrorKind::UnexpectedEof))
         })
     }
+    pub fn skip_byte(&mut self) -> Result<()> {
+        self.byte().map(|_| ())
+    }
     pub fn tag_type(&mut self) -> Result<u8> {
         self.byte()
     }

@@ -451,6 +451,21 @@ fn tag_reader_read_tag_compound_preserves_non_utf8_name_bytes() {
 }
 
 #[test]
+fn tag_reader_skip_tag_byte_consumes_one_byte() {
+    let mut reader = nbt::Reader::new(&[0x42, 0x43], Encoding::LittleEndian);
+    reader.skip_byte().unwrap();
+    assert_eq!(reader.byte().unwrap(), 0x43);
+    assert_eq!(reader.pos, 2);
+}
+
+#[test]
+fn tag_reader_skip_tag_byte_eof_advances_offset_like_go() {
+    let mut reader = nbt::Reader::new(&[], Encoding::LittleEndian);
+    assert!(reader.skip_byte().is_err());
+    assert_eq!(reader.pos, 1);
+}
+
+#[test]
 fn tag_reader_read_tag_and_end() {
     let mut reader = nbt::Reader::new(&[1, 4, 0, b't', b'e', b's', b't'], Encoding::LittleEndian);
     assert_eq!(reader.read_tag().unwrap(), (1, "test".into()));
