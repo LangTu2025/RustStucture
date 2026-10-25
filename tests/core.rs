@@ -569,6 +569,36 @@ fn tag_reader_skip_tag_float64_partial_and_eof_advance_offset() {
 }
 
 #[test]
+fn tag_reader_skip_tag_string_uses_fixed_int16_length_for_all_encodings() {
+    for encoding in [Encoding::LittleEndian, Encoding::BigEndian, Encoding::NetworkLittleEndian] {
+        let bytes = match encoding {
+            Encoding::BigEndian => vec![0, 2, b'H', b'i', 0x43],
+            _ => vec![2, 0, b'H', b'i', 0x43],
+        };
+        let mut reader = nbt::Reader::new(&bytes, encoding);
+        reader.skip_string().unwrap();
+        assert_eq!(reader.byte().unwrap(), 0x43, "{encoding:?}");
+        assert_eq!(reader.pos, 5);
+    }
+}
+
+#[test]
+fn tag_reader_skip_tag_string_handles_negative_and_truncated_lengths() {
+    let mut negative = nbt::Reader::new(&[0xff, 0xff, 0x43], Encoding::LittleEndian);
+    assert!(negative.skip_string().is_err());
+    assert_eq!(negative.pos, 2);
+    assert_eq!(negative.byte().unwrap(), 0x43);
+
+    let mut partial = nbt::Reader::new(&[3, 0, b'H'], Encoding::LittleEndian);
+    assert!(partial.skip_string().is_err());
+    assert_eq!(partial.pos, 3);
+
+    let mut empty = nbt::Reader::new(&[0, 0], Encoding::LittleEndian);
+    empty.skip_string().unwrap();
+    assert_eq!(empty.pos, 2);
+}
+
+#[test]
 fn tag_reader_read_tag_and_end() {
     let mut reader = nbt::Reader::new(&[1, 4, 0, b't', b'e', b's', b't'], Encoding::LittleEndian);
     assert_eq!(reader.read_tag().unwrap(), (1, "test".into()));
