@@ -230,6 +230,20 @@ impl<'a> Reader<'a> {
     pub fn skip_short(&mut self) -> Result<()> {
         self.short().map(|_| ())
     }
+    fn skip_bytes(&mut self, count: usize) -> Result<()> {
+        let available = self.data.len().saturating_sub(self.pos);
+        if available < count {
+            self.pos += available;
+            return Err(Error::Io(std::io::Error::from(
+                std::io::ErrorKind::UnexpectedEof,
+            )));
+        }
+        self.pos += count;
+        Ok(())
+    }
+    pub fn skip_int(&mut self) -> Result<()> {
+        self.skip_bytes(4)
+    }
     pub fn int(&mut self) -> Result<i32> {
         if self.encoding.net() {
             let mut value = 0u32;
