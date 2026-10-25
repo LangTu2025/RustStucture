@@ -944,6 +944,22 @@ fn tag_writer_round_trip() {
 }
 
 #[test]
+fn tag_writer_write_tag_type_validates_and_writes_tag_byte() {
+    let mut writer = nbt::Writer::new(Encoding::LittleEndian);
+    for tag in 0..=12 {
+        writer.write_tag_type(tag).unwrap();
+    }
+    assert_eq!(writer.data, (0..=12).collect::<Vec<u8>>());
+
+    let error = writer.write_tag_type(255).unwrap_err();
+    assert_eq!(writer.data, (0..=12).collect::<Vec<u8>>());
+    assert_eq!(
+        error.to_string(),
+        "nbt: 在偏移 13 处的操作 'WriteTagType' 发现未知标签 '%!v(PANIC=String method: 未知标签)'"
+    );
+}
+
+#[test]
 fn tag_writer_rejects_mixed_type_list() {
     let value = Nbt::List(vec![Nbt::Byte(1), Nbt::Int(2)]);
     assert!(nbt::encode("", &value, Encoding::LittleEndian).is_err());

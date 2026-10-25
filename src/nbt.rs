@@ -640,6 +640,16 @@ impl Writer {
             encoding,
         }
     }
+    pub fn write_tag_type(&mut self, tag: u8) -> Result<()> {
+        if tag > 12 {
+            return Err(Error::invalid(format!(
+                "nbt: 在偏移 {} 处的操作 'WriteTagType' 发现未知标签 '%!v(PANIC=String method: 未知标签)'",
+                self.data.len()
+            )));
+        }
+        self.data.push(tag);
+        Ok(())
+    }
     pub fn varuint(&mut self, mut n: u64) {
         while n >= 128 {
             self.data.push(n as u8 | 128);
