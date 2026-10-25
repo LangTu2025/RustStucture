@@ -629,6 +629,51 @@ pub fn decode(bytes: &[u8], encoding: Encoding) -> Result<(String, Nbt)> {
     }
     Reader::new(bytes, encoding).named()
 }
+
+pub trait TagWriteSink {
+    fn write(&mut self, bytes: &[u8]) -> (usize, Option<std::io::Error>);
+}
+
+pub struct IoWriteSink<W>(pub W);
+
+impl<W> IoWriteSink<W> {
+    pub fn new(writer: W) -> Self {
+        Self(writer)
+    }
+
+    pub fn into_inner(self) -> W {
+        self.0
+    }
+}
+
+impl<W: std::io::Write> TagWriteSink for IoWriteSink<W> {
+    fn write(&mut self, bytes: &[u8]) -> (usize, Option<std::io::Error>) {
+        match self.0.write(bytes) {
+            Ok(written) => (written, None),
+            Err(error) => (0, Some(error)),
+        }
+    }
+}
+
+pub struct OffsetWriter<S> {
+    sink: S,
+    offset: u64,
+}
+
+impl<S> OffsetWriter<S> {
+    pub fn new(sink: S) -> Self {
+        Self { sink, offset: 0 }
+    }
+
+    pub fn get_offset(&self) -> u64 {
+        self.offset
+    }
+
+    pub fn into_inner(self) -> S {
+        self.sink
+    }
+}
+
 pub struct Writer {
     pub data: Vec<u8>,
     pub encoding: Encoding,
@@ -652,6 +697,27 @@ impl Writer {
     }
     pub fn write_tag_byte(&mut self, value: u8) -> Result<()> {
         self.data.push(value);
+        Ok(())
+    }
+    pub fn write_tag_byte_to<S: TagWriteSink>(
+        &self,
+        writer: &mut OffsetWriter<S>,
+        value: u8,
+    ) -> Result<()> {
+        let (written, error) = writer.sink.write(&[value]);
+        writer.offset += written as u64;
+        if let Some(error) = error {
+            return Err(Error::Other(format!(
+                "nbt: 在偏移 {} 的操作 'WriteTagByte' 写入失败: {error}",
+                writer.offset
+            )));
+        }
+        if written != 1 {
+            return Err(Error::Other(format!(
+                "nbt: 在偏移 {} 的操作 'WriteTagByte' 写入失败: short write",
+                writer.offset
+            )));
+        }
         Ok(())
     }
     pub fn varuint(&mut self, mut n: u64) {

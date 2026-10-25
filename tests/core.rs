@@ -969,6 +969,69 @@ fn tag_writer_write_tag_byte_appends_raw_byte_values() {
 }
 
 #[test]
+fn tag_writer_write_tag_byte_to_tracks_success_short_write_and_errors() {
+    struct ScriptedSink {
+        result: Option<(usize, Option<std::io::Error>)>,
+        bytes: Vec<u8>,
+    }
+
+    impl nbt::TagWriteSink for ScriptedSink {
+        fn write(&mut self, bytes: &[u8]) -> (usize, Option<std::io::Error>) {
+            let (written, error) = self.result.take().unwrap();
+            self.bytes
+                .extend_from_slice(&bytes[..written.min(bytes.len())]);
+            (written, error)
+        }
+    }
+
+    let writer = nbt::Writer::new(Encoding::LittleEndian);
+    let mut standard = nbt::OffsetWriter::new(nbt::IoWriteSink::new(Vec::new()));
+    writer.write_tag_byte_to(&mut standard, 0xa5).unwrap();
+    assert_eq!(standard.get_offset(), 1);
+    assert_eq!(standard.into_inner().into_inner(), [0xa5]);
+
+    let mut short = nbt::OffsetWriter::new(ScriptedSink {
+        result: Some((0, None)),
+        bytes: Vec::new(),
+    });
+    assert_eq!(
+        writer
+            .write_tag_byte_to(&mut short, 0x11)
+            .unwrap_err()
+            .to_string(),
+        "nbt: 在偏移 0 的操作 'WriteTagByte' 写入失败: short write"
+    );
+    assert_eq!(short.get_offset(), 0);
+
+    let mut failed = nbt::OffsetWriter::new(ScriptedSink {
+        result: Some((0, Some(std::io::Error::other("broken")))),
+        bytes: Vec::new(),
+    });
+    assert_eq!(
+        writer
+            .write_tag_byte_to(&mut failed, 0x22)
+            .unwrap_err()
+            .to_string(),
+        "nbt: 在偏移 0 的操作 'WriteTagByte' 写入失败: broken"
+    );
+    assert_eq!(failed.get_offset(), 0);
+
+    let mut partial_error = nbt::OffsetWriter::new(ScriptedSink {
+        result: Some((1, Some(std::io::Error::other("after write")))),
+        bytes: Vec::new(),
+    });
+    assert_eq!(
+        writer
+            .write_tag_byte_to(&mut partial_error, 0x33)
+            .unwrap_err()
+            .to_string(),
+        "nbt: 在偏移 1 的操作 'WriteTagByte' 写入失败: after write"
+    );
+    assert_eq!(partial_error.get_offset(), 1);
+    assert_eq!(partial_error.into_inner().bytes, [0x33]);
+}
+
+#[test]
 fn tag_writer_rejects_mixed_type_list() {
     let value = Nbt::List(vec![Nbt::Byte(1), Nbt::Int(2)]);
     assert!(nbt::encode("", &value, Encoding::LittleEndian).is_err());
