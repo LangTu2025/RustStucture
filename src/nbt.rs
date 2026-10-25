@@ -695,6 +695,44 @@ impl Writer {
         self.data.push(tag);
         Ok(())
     }
+    pub fn write_tag(&mut self, tag: u8, name: &str) -> Result<()> {
+        self.write_tag_type(tag)?;
+        if tag == 0 || (self.encoding == Encoding::NetworkBigEndian && tag == 10) {
+            return Ok(());
+        }
+        self.write_tag_string(name)
+    }
+    pub fn write_tag_to<S: TagWriteSink>(
+        &self,
+        writer: &mut OffsetWriter<S>,
+        tag: u8,
+        name: &str,
+    ) -> Result<()> {
+        if tag > 12 {
+            return Err(Error::invalid(format!(
+                "nbt: 在偏移 {} 处的操作 'WriteTagType' 发现未知标签 '%!v(PANIC=String method: 未知标签)'",
+                writer.offset
+            )));
+        }
+        let (written, error) = writer.sink.write(&[tag]);
+        writer.offset += written as u64;
+        if let Some(error) = error {
+            return Err(Error::Other(format!(
+                "nbt: 在偏移 {} 的操作 'WriteTagType' 写入失败: {error}",
+                writer.offset
+            )));
+        }
+        if written != 1 {
+            return Err(Error::Other(format!(
+                "nbt: 在偏移 {} 的操作 'WriteTagType' 写入失败: short write",
+                writer.offset
+            )));
+        }
+        if tag == 0 || (self.encoding == Encoding::NetworkBigEndian && tag == 10) {
+            return Ok(());
+        }
+        self.write_tag_string_to(writer, name)
+    }
     pub fn write_tag_byte(&mut self, value: u8) -> Result<()> {
         self.data.push(value);
         Ok(())

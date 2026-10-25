@@ -960,6 +960,82 @@ fn tag_writer_write_tag_type_validates_and_writes_tag_byte() {
 }
 
 #[test]
+fn tag_writer_write_tag_matches_go_header_rules_and_sink_errors() {
+    struct ScriptedSink {
+        result: Option<(usize, Option<std::io::Error>)>,
+        bytes: Vec<u8>,
+    }
+
+    impl nbt::TagWriteSink for ScriptedSink {
+        fn write(&mut self, bytes: &[u8]) -> (usize, Option<std::io::Error>) {
+            let (written, error) = self.result.take().unwrap();
+            self.bytes
+                .extend_from_slice(&bytes[..written.min(bytes.len())]);
+            (written, error)
+        }
+    }
+
+    for (encoding, expected) in [
+        (Encoding::LittleEndian, vec![8, 1, 0, b'n']),
+        (Encoding::NetworkLittleEndian, vec![8, 1, b'n']),
+        (Encoding::BigEndian, vec![8, 0, 1, b'n']),
+        (Encoding::NetworkBigEndian, vec![8, 0, 1, b'n']),
+    ] {
+        let mut writer = nbt::Writer::new(encoding);
+        writer.write_tag(8, "n").unwrap();
+        assert_eq!(writer.data, expected);
+
+        let mut sink = nbt::OffsetWriter::new(nbt::IoWriteSink::new(Vec::new()));
+        writer.write_tag_to(&mut sink, 8, "n").unwrap();
+        assert_eq!(sink.get_offset(), expected.len() as u64);
+        assert_eq!(sink.into_inner().into_inner(), expected);
+    }
+
+    let mut end = nbt::Writer::new(Encoding::LittleEndian);
+    end.write_tag(0, "ignored").unwrap();
+    assert_eq!(end.data, [0]);
+
+    let mut network_big = nbt::Writer::new(Encoding::NetworkBigEndian);
+    network_big.write_tag(10, "root").unwrap();
+    assert_eq!(network_big.data, [10]);
+
+    let mut invalid = nbt::Writer::new(Encoding::LittleEndian);
+    assert_eq!(
+        invalid.write_tag(13, "n").unwrap_err().to_string(),
+        "nbt: 在偏移 0 处的操作 'WriteTagType' 发现未知标签 '%!v(PANIC=String method: 未知标签)'"
+    );
+    assert!(invalid.data.is_empty());
+
+    let writer = nbt::Writer::new(Encoding::LittleEndian);
+    let mut short = nbt::OffsetWriter::new(ScriptedSink {
+        result: Some((0, None)),
+        bytes: Vec::new(),
+    });
+    assert_eq!(
+        writer
+            .write_tag_to(&mut short, 8, "n")
+            .unwrap_err()
+            .to_string(),
+        "nbt: 在偏移 0 的操作 'WriteTagType' 写入失败: short write"
+    );
+    assert_eq!(short.get_offset(), 0);
+
+    let mut name_error = nbt::OffsetWriter::new(ScriptedSink {
+        result: Some((1, Some(std::io::Error::other("type failed")))),
+        bytes: Vec::new(),
+    });
+    assert_eq!(
+        writer
+            .write_tag_to(&mut name_error, 8, "n")
+            .unwrap_err()
+            .to_string(),
+        "nbt: 在偏移 1 的操作 'WriteTagType' 写入失败: type failed"
+    );
+    assert_eq!(name_error.get_offset(), 1);
+    assert_eq!(name_error.into_inner().bytes, [8]);
+}
+
+#[test]
 fn tag_writer_write_tag_byte_appends_raw_byte_values() {
     let mut writer = nbt::Writer::new(Encoding::BigEndian);
     writer.write_tag_byte(0).unwrap();
