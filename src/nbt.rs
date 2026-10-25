@@ -227,6 +227,9 @@ impl<'a> Reader<'a> {
             i16::from_be_bytes(b)
         })
     }
+    pub fn skip_short(&mut self) -> Result<()> {
+        self.short().map(|_| ())
+    }
     pub fn int(&mut self) -> Result<i32> {
         if self.encoding.net() {
             let mut value = 0u32;

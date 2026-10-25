@@ -466,6 +466,25 @@ fn tag_reader_skip_tag_byte_eof_advances_offset_like_go() {
 }
 
 #[test]
+fn tag_reader_skip_tag_int16_consumes_two_bytes() {
+    let mut reader = nbt::Reader::new(&[0x34, 0x12, 0x43], Encoding::LittleEndian);
+    reader.skip_short().unwrap();
+    assert_eq!(reader.byte().unwrap(), 0x43);
+    assert_eq!(reader.pos, 3);
+}
+
+#[test]
+fn tag_reader_skip_tag_int16_partial_and_eof_advance_offset() {
+    let mut partial = nbt::Reader::new(&[0x34], Encoding::LittleEndian);
+    assert!(partial.skip_short().is_err());
+    assert_eq!(partial.pos, 1);
+
+    let mut empty = nbt::Reader::new(&[], Encoding::LittleEndian);
+    assert!(empty.skip_short().is_err());
+    assert_eq!(empty.pos, 0);
+}
+
+#[test]
 fn tag_reader_read_tag_and_end() {
     let mut reader = nbt::Reader::new(&[1, 4, 0, b't', b'e', b's', b't'], Encoding::LittleEndian);
     assert_eq!(reader.read_tag().unwrap(), (1, "test".into()));
