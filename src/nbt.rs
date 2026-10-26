@@ -1754,6 +1754,7 @@ impl Writer {
         depth: usize,
     ) -> Result<()> {
         match value {
+            encoder::Value::Bool(value) => self.write_tag_byte_to(writer, u8::from(*value)),
             encoder::Value::Byte(value) => self.write_tag_byte_to(writer, *value),
             encoder::Value::Short(value) => self.write_tag_int16_to(writer, *value),
             encoder::Value::Int(value) => self.write_tag_int32_to(writer, *value),
@@ -1782,6 +1783,55 @@ impl Writer {
                     self.write_encoded_payload_to(writer, value, depth + 1)?;
                 }
                 self.write_single_byte_to(writer, 0, "WriteTagCompoundEnd")
+            }
+        }
+    }
+    fn write_partial_encoded_root_to<S: TagWriteSink>(
+        &self,
+        writer: &mut OffsetWriter<S>,
+        value: &encoder::PartialValue,
+    ) -> Result<()> {
+        self.write_tag_type_to(writer, value.tag())?;
+        if self.encoding != Encoding::NetworkBigEndian || value.tag() != 10 {
+            self.write_tag_string_to(writer, "")?;
+        }
+        self.write_partial_encoded_payload_to(writer, value, 0)
+    }
+    fn write_partial_encoded_payload_to<S: TagWriteSink>(
+        &self,
+        writer: &mut OffsetWriter<S>,
+        value: &encoder::PartialValue,
+        depth: usize,
+    ) -> Result<()> {
+        match value {
+            encoder::PartialValue::Complete(value) => {
+                self.write_encoded_payload_to(writer, value, depth)
+            }
+            encoder::PartialValue::Compound(fields) => {
+                for (name, value) in fields {
+                    if depth + 1 >= 512 {
+                        return Err(Error::Other("nbt: 达到最大嵌套深度 512".into()));
+                    }
+                    self.write_tag_type_to(writer, value.tag())?;
+                    self.write_tag_string_to(writer, name)?;
+                    self.write_partial_encoded_payload_to(writer, value, depth + 1)?;
+                }
+                Ok(())
+            }
+            encoder::PartialValue::List {
+                tag,
+                len,
+                values,
+                prefix_written,
+            } => {
+                if *prefix_written {
+                    self.write_tag_type_to(writer, *tag)?;
+                    self.write_tag_int32_to(writer, *len as i32)?;
+                    for value in values {
+                        self.write_partial_encoded_payload_to(writer, value, depth + 1)?;
+                    }
+                }
+                Ok(())
             }
         }
     }

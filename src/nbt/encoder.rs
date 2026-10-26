@@ -5,6 +5,7 @@ use std::io::Write;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum Value {
+    Bool(bool),
     Byte(u8),
     Short(i16),
     Int(i32),
@@ -22,7 +23,7 @@ pub(super) enum Value {
 impl Value {
     pub(super) fn tag(&self) -> u8 {
         match self {
-            Self::Byte(_) => 1,
+            Self::Bool(_) | Self::Byte(_) => 1,
             Self::Short(_) => 2,
             Self::Int(_) => 3,
             Self::Long(_) => 4,
@@ -39,11 +40,65 @@ impl Value {
 }
 
 #[derive(Debug)]
-struct SerError(String);
+struct SerError {
+    message: String,
+    incompatible_type: Option<String>,
+    value_name: Option<String>,
+    partial: Option<PartialValue>,
+}
+
+#[derive(Debug)]
+pub(super) enum PartialValue {
+    Complete(Value),
+    Compound(Vec<(String, PartialValue)>),
+    List {
+        tag: u8,
+        len: usize,
+        values: Vec<PartialValue>,
+        prefix_written: bool,
+    },
+}
+
+impl PartialValue {
+    pub(super) fn tag(&self) -> u8 {
+        match self {
+            Self::Complete(value) => value.tag(),
+            Self::Compound(_) => 10,
+            Self::List { .. } => 9,
+        }
+    }
+}
+
+impl SerError {
+    fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            incompatible_type: None,
+            value_name: None,
+            partial: None,
+        }
+    }
+
+    fn incompatible(type_name: impl Into<String>) -> Self {
+        let mut error = Self::new("");
+        error.incompatible_type = Some(type_name.into());
+        error
+    }
+
+    fn display_message(&self) -> String {
+        match &self.incompatible_type {
+            Some(type_name) => format!(
+                "nbt: 值类型 {type_name}（{}）无法转换为 NBT 标签",
+                self.value_name.as_deref().unwrap_or("")
+            ),
+            None => self.message.clone(),
+        }
+    }
+}
 
 impl std::fmt::Display for SerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
+        f.write_str(&self.display_message())
     }
 }
 
@@ -51,11 +106,33 @@ impl std::error::Error for SerError {}
 
 impl ser::Error for SerError {
     fn custom<T: std::fmt::Display>(msg: T) -> Self {
-        Self(msg.to_string())
+        Self::new(msg.to_string())
     }
 }
 
 type SerResult<T> = std::result::Result<T, SerError>;
+
+fn go_type_name<T: ?Sized>() -> String {
+    let rust_name = std::any::type_name::<T>();
+    let rust_name = rust_name.strip_prefix('&').unwrap_or(rust_name);
+    match rust_name {
+        "bool" => "bool".into(),
+        "u8" => "uint8".into(),
+        "i8" => "int8".into(),
+        "i16" => "int16".into(),
+        "i32" => "int32".into(),
+        "i64" => "int64".into(),
+        "i128" => "int128".into(),
+        "u16" => "uint16".into(),
+        "u32" => "uint32".into(),
+        "u64" => "uint64".into(),
+        "u128" => "uint128".into(),
+        "f32" => "float32".into(),
+        "f64" => "float64".into(),
+        "alloc::string::String" => "string".into(),
+        other => other.to_string(),
+    }
+}
 
 #[derive(Clone, Copy)]
 struct Serializer {
@@ -74,9 +151,50 @@ struct Sequence {
     values: Vec<Value>,
     tuple: bool,
     expected_tag: Option<u8>,
+    declared_len: Option<usize>,
 }
 
 impl Sequence {
+    fn serialize_one<T: ?Sized + Serialize>(&mut self, value: &T) -> SerResult<()> {
+        match Serializer::encode(value) {
+            Ok(value) => {
+                self.values.push(value);
+                Ok(())
+            }
+            Err(mut error) => {
+                if let Some(type_name) = error.incompatible_type.take() {
+                    error.incompatible_type = Some(if self.tuple {
+                        format!("[{}]{type_name}", self.declared_len.unwrap_or(0))
+                    } else {
+                        format!("[]{type_name}")
+                    });
+                }
+                let prefix_written = self.expected_tag.is_some()
+                    || !self.values.is_empty()
+                    || error.partial.is_some();
+                let tag = self
+                    .expected_tag
+                    .or_else(|| self.values.first().map(Value::tag))
+                    .or_else(|| error.partial.as_ref().map(PartialValue::tag))
+                    .unwrap_or(0);
+                let mut values = std::mem::take(&mut self.values)
+                    .into_iter()
+                    .map(PartialValue::Complete)
+                    .collect::<Vec<_>>();
+                if let Some(partial) = error.partial.take() {
+                    values.push(partial);
+                }
+                error.partial = Some(PartialValue::List {
+                    tag,
+                    len: self.declared_len.unwrap_or(values.len()),
+                    values,
+                    prefix_written,
+                });
+                Err(error)
+            }
+        }
+    }
+
     fn finish(self) -> SerResult<Value> {
         if self.tuple {
             let first = self.values.first().map(Value::tag);
@@ -84,6 +202,9 @@ impl Sequence {
                 if self.values.iter().all(|value| value.tag() == tag) {
                     match tag {
                         1 => {
+                            if !self.values.iter().all(|value| matches!(value, Value::Byte(_))) {
+                                return Err(SerError::new("unsupported Go NBT array element type"));
+                            }
                             return Ok(Value::ByteArray(
                                 self.values
                                     .into_iter()
@@ -119,7 +240,7 @@ impl Sequence {
                         _ => {}
                     }
                 }
-                return Err(SerError("unsupported Go NBT array element type".into()));
+                return Err(SerError::new("unsupported Go NBT array element type"));
             }
         }
         let tag = self
@@ -127,10 +248,10 @@ impl Sequence {
             .or_else(|| self.values.first().map(Value::tag))
             .unwrap_or(0);
         if tag == 0 && !self.values.is_empty() {
-            return Err(SerError("NBT List cannot contain TAG_End values".into()));
+            return Err(SerError::new("NBT List cannot contain TAG_End values"));
         }
         if tag > 12 || self.values.iter().any(|value| value.tag() != tag) {
-            return Err(SerError("NBT List 包含不同类型".into()));
+            return Err(SerError::new("NBT List 包含不同类型"));
         }
         Ok(Value::List(tag, self.values))
     }
@@ -140,8 +261,7 @@ impl ser::SerializeSeq for Sequence {
     type Ok = Value;
     type Error = SerError;
     fn serialize_element<T: ?Sized + Serialize>(&mut self, value: &T) -> SerResult<()> {
-        self.values.push(Serializer::encode(value)?);
-        Ok(())
+        self.serialize_one(value)
     }
     fn end(self) -> SerResult<Value> {
         self.finish()
@@ -152,8 +272,7 @@ impl ser::SerializeTuple for Sequence {
     type Ok = Value;
     type Error = SerError;
     fn serialize_element<T: ?Sized + Serialize>(&mut self, value: &T) -> SerResult<()> {
-        self.values.push(Serializer::encode(value)?);
-        Ok(())
+        self.serialize_one(value)
     }
     fn end(self) -> SerResult<Value> {
         self.finish()
@@ -164,8 +283,7 @@ impl ser::SerializeTupleStruct for Sequence {
     type Ok = Value;
     type Error = SerError;
     fn serialize_field<T: ?Sized + Serialize>(&mut self, value: &T) -> SerResult<()> {
-        self.values.push(Serializer::encode(value)?);
-        Ok(())
+        self.serialize_one(value)
     }
     fn end(self) -> SerResult<Value> {
         self.finish()
@@ -175,6 +293,7 @@ impl ser::SerializeTupleStruct for Sequence {
 struct MapBuilder {
     fields: Vec<(String, Value)>,
     key: Option<String>,
+    map_type: Option<String>,
 }
 
 impl ser::SerializeMap for MapBuilder {
@@ -186,16 +305,45 @@ impl ser::SerializeMap for MapBuilder {
                 self.key = Some(key);
                 Ok(())
             }
-            _ => Err(SerError("NBT map key must be a string".into())),
+            _ => {
+                let mut error = SerError::incompatible(
+                    self.map_type.clone().unwrap_or_else(|| "map".into()),
+                );
+                error.partial = Some(PartialValue::Compound(
+                    self.fields
+                        .drain(..)
+                        .map(|(name, value)| (name, PartialValue::Complete(value)))
+                        .collect(),
+                ));
+                Err(error)
+            }
         }
     }
     fn serialize_value<T: ?Sized + Serialize>(&mut self, value: &T) -> SerResult<()> {
         let key = self
             .key
             .take()
-            .ok_or_else(|| SerError("map value without key".into()))?;
-        self.fields.push((key, Serializer::encode(value)?));
-        Ok(())
+            .ok_or_else(|| SerError::new("map value without key"))?;
+        match Serializer::encode(value) {
+            Ok(value) => {
+                self.fields.push((key, value));
+                Ok(())
+            }
+            Err(mut error) => {
+                if error.value_name.is_none() {
+                    error.value_name = Some(key.clone());
+                }
+                let mut fields = std::mem::take(&mut self.fields)
+                    .into_iter()
+                    .map(|(name, value)| (name, PartialValue::Complete(value)))
+                    .collect::<Vec<_>>();
+                if let Some(partial) = error.partial.take() {
+                    fields.push((key, partial));
+                }
+                error.partial = Some(PartialValue::Compound(fields));
+                Err(error)
+            }
+        }
     }
     fn end(self) -> SerResult<Value> {
         Ok(Value::Compound(self.fields))
@@ -205,6 +353,11 @@ impl ser::SerializeMap for MapBuilder {
         key: &K,
         value: &V,
     ) -> SerResult<()> {
+        self.map_type = Some(format!(
+            "map[{}]{}",
+            go_type_name::<K>(),
+            go_type_name::<V>()
+        ));
         self.serialize_key(key)?;
         self.serialize_value(value)
     }
@@ -218,9 +371,26 @@ impl ser::SerializeStruct for MapBuilder {
         key: &'static str,
         value: &T,
     ) -> SerResult<()> {
-        self.fields
-            .push((key.to_string(), Serializer::encode(value)?));
-        Ok(())
+        match Serializer::encode(value) {
+            Ok(value) => {
+                self.fields.push((key.to_string(), value));
+                Ok(())
+            }
+            Err(mut error) => {
+                if error.value_name.is_none() {
+                    error.value_name = Some(key.to_string());
+                }
+                let mut fields = std::mem::take(&mut self.fields)
+                    .into_iter()
+                    .map(|(name, value)| (name, PartialValue::Complete(value)))
+                    .collect::<Vec<_>>();
+                if let Some(partial) = error.partial.take() {
+                    fields.push((key.to_string(), partial));
+                }
+                error.partial = Some(PartialValue::Compound(fields));
+                Err(error)
+            }
+        }
     }
     fn end(self) -> SerResult<Value> {
         Ok(Value::Compound(self.fields))
@@ -239,10 +409,10 @@ impl ser::Serializer for Serializer {
     type SerializeStructVariant = Impossible<Value, SerError>;
 
     fn serialize_bool(self, value: bool) -> SerResult<Value> {
-        Ok(Value::Byte(u8::from(value)))
+        Ok(Value::Bool(value))
     }
     fn serialize_i8(self, _: i8) -> SerResult<Value> {
-        Err(SerError("unsupported Go NBT kind: int8".into()))
+        Err(SerError::incompatible("int8"))
     }
     fn serialize_i16(self, value: i16) -> SerResult<Value> {
         Ok(Value::Short(value))
@@ -254,22 +424,22 @@ impl ser::Serializer for Serializer {
         Ok(Value::Long(value))
     }
     fn serialize_i128(self, _: i128) -> SerResult<Value> {
-        Err(SerError("unsupported Go NBT kind: int128".into()))
+        Err(SerError::new("unsupported Go NBT kind: int128"))
     }
     fn serialize_u8(self, value: u8) -> SerResult<Value> {
         Ok(Value::Byte(value))
     }
     fn serialize_u16(self, _: u16) -> SerResult<Value> {
-        Err(SerError("unsupported Go NBT kind: uint16".into()))
+        Err(SerError::incompatible("uint16"))
     }
     fn serialize_u32(self, _: u32) -> SerResult<Value> {
-        Err(SerError("unsupported Go NBT kind: uint32".into()))
+        Err(SerError::incompatible("uint32"))
     }
     fn serialize_u64(self, _: u64) -> SerResult<Value> {
-        Err(SerError("unsupported Go NBT kind: uint64".into()))
+        Err(SerError::incompatible("uint64"))
     }
     fn serialize_u128(self, _: u128) -> SerResult<Value> {
-        Err(SerError("unsupported Go NBT kind: uint128".into()))
+        Err(SerError::new("unsupported Go NBT kind: uint128"))
     }
     fn serialize_f32(self, value: f32) -> SerResult<Value> {
         Ok(Value::Float(value))
@@ -278,7 +448,7 @@ impl ser::Serializer for Serializer {
         Ok(Value::Double(value))
     }
     fn serialize_char(self, value: char) -> SerResult<Value> {
-        Err(SerError(format!(
+        Err(SerError::new(format!(
             "unsupported Go NBT kind: Rust char ({value:?})"
         )))
     }
@@ -292,19 +462,19 @@ impl ser::Serializer for Serializer {
         ))
     }
     fn serialize_none(self) -> SerResult<Value> {
-        Err(SerError("nil Go pointer cannot be encoded".into()))
+        Err(SerError::new("nil Go pointer cannot be encoded"))
     }
     fn serialize_some<T: ?Sized + Serialize>(self, value: &T) -> SerResult<Value> {
         value.serialize(self)
     }
     fn serialize_unit(self) -> SerResult<Value> {
-        Err(SerError("unsupported Go NBT kind: unit".into()))
+        Err(SerError::new("unsupported Go NBT kind: unit"))
     }
     fn serialize_unit_struct(self, _: &'static str) -> SerResult<Value> {
         Ok(Value::Compound(Vec::new()))
     }
     fn serialize_unit_variant(self, _: &'static str, _: u32, _: &'static str) -> SerResult<Value> {
-        Err(SerError("unsupported Go NBT enum".into()))
+        Err(SerError::new("unsupported Go NBT enum"))
     }
     fn serialize_newtype_struct<T: ?Sized + Serialize>(
         self,
@@ -329,24 +499,24 @@ impl ser::Serializer for Serializer {
                 Value::ByteArray(values) => (1, values.into_iter().map(Value::Byte).collect()),
                 Value::IntArray(values) => (3, values.into_iter().map(Value::Int).collect()),
                 Value::LongArray(values) => (4, values.into_iter().map(Value::Long).collect()),
-                _ => return Err(SerError("invalid typed NBT array".into())),
+                _ => return Err(SerError::new("invalid typed NBT array")),
             };
             let expected_element_tag = match tag {
                 7 => 1,
                 11 => 3,
                 12 => 4,
-                _ => return Err(SerError("typed NBT array tag must be 7, 11, or 12".into())),
+                _ => return Err(SerError::new("typed NBT array tag must be 7, 11, or 12")),
             };
             if !values.is_empty() && actual_tag != expected_element_tag {
-                return Err(SerError("typed NBT array element type mismatch".into()));
+                return Err(SerError::new("typed NBT array element type mismatch"));
             }
             return match tag {
                 7 => values
                     .into_iter()
                     .map(|value| match value {
                         Value::Byte(byte) => Ok(byte),
-                        _ => Err(SerError(
-                            "typed NBT byte array element type mismatch".into(),
+                        _ => Err(SerError::new(
+                            "typed NBT byte array element type mismatch",
                         )),
                     })
                     .collect::<SerResult<Vec<_>>>()
@@ -355,7 +525,7 @@ impl ser::Serializer for Serializer {
                     .into_iter()
                     .map(|value| match value {
                         Value::Int(number) => Ok(number),
-                        _ => Err(SerError("typed NBT int array element type mismatch".into())),
+                        _ => Err(SerError::new("typed NBT int array element type mismatch")),
                     })
                     .collect::<SerResult<Vec<_>>>()
                     .map(Value::IntArray),
@@ -363,13 +533,13 @@ impl ser::Serializer for Serializer {
                     .into_iter()
                     .map(|value| match value {
                         Value::Long(number) => Ok(number),
-                        _ => Err(SerError(
-                            "typed NBT long array element type mismatch".into(),
+                        _ => Err(SerError::new(
+                            "typed NBT long array element type mismatch",
                         )),
                     })
                     .collect::<SerResult<Vec<_>>>()
                     .map(Value::LongArray),
-                _ => Err(SerError("typed NBT array tag must be 7, 11, or 12".into())),
+                _ => Err(SerError::new("typed NBT array tag must be 7, 11, or 12")),
             };
         }
         value.serialize(self)
@@ -381,13 +551,14 @@ impl ser::Serializer for Serializer {
         _: &'static str,
         _: &T,
     ) -> SerResult<Value> {
-        Err(SerError("unsupported Go NBT enum".into()))
+        Err(SerError::new("unsupported Go NBT enum"))
     }
     fn serialize_seq(self, len: Option<usize>) -> SerResult<Sequence> {
         Ok(Sequence {
             values: Vec::with_capacity(len.unwrap_or(0)),
             tuple: false,
             expected_tag: self.expected_list_tag,
+            declared_len: len,
         })
     }
     fn serialize_tuple(self, len: usize) -> SerResult<Sequence> {
@@ -395,6 +566,7 @@ impl ser::Serializer for Serializer {
             values: Vec::with_capacity(len),
             tuple: true,
             expected_tag: None,
+            declared_len: Some(len),
         })
     }
     fn serialize_tuple_struct(self, _: &'static str, len: usize) -> SerResult<Sequence> {
@@ -407,18 +579,20 @@ impl ser::Serializer for Serializer {
         _: &'static str,
         _: usize,
     ) -> SerResult<Self::SerializeTupleVariant> {
-        Err(SerError("unsupported Go NBT enum".into()))
+        Err(SerError::new("unsupported Go NBT enum"))
     }
     fn serialize_map(self, len: Option<usize>) -> SerResult<MapBuilder> {
         Ok(MapBuilder {
             fields: Vec::with_capacity(len.unwrap_or(0)),
             key: None,
+            map_type: None,
         })
     }
     fn serialize_struct(self, _: &'static str, len: usize) -> SerResult<MapBuilder> {
         Ok(MapBuilder {
             fields: Vec::with_capacity(len),
             key: None,
+            map_type: None,
         })
     }
     fn serialize_struct_variant(
@@ -428,7 +602,7 @@ impl ser::Serializer for Serializer {
         _: &'static str,
         _: usize,
     ) -> SerResult<Self::SerializeStructVariant> {
-        Err(SerError("unsupported Go NBT enum".into()))
+        Err(SerError::new("unsupported Go NBT enum"))
     }
 }
 
@@ -521,13 +695,21 @@ impl<W: Write> Encoder<W> {
         }
     }
     pub fn encode<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<()> {
-        let encoded =
-            Serializer::encode(value).map_err(|error| Error::invalid(error.to_string()))?;
         let mut writer = super::OffsetWriter::with_offset(
             super::IoWriteSink::new(&mut self.writer),
             self.offset,
         );
-        let result = Writer::new(self.encoding).write_encoded_root_to(&mut writer, &encoded);
+        let encoder = Writer::new(self.encoding);
+        let result = match Serializer::encode(value) {
+            Ok(encoded) => encoder.write_encoded_root_to(&mut writer, &encoded),
+            Err(error) => {
+                let partial_result = match error.partial.as_ref() {
+                    Some(partial) => encoder.write_partial_encoded_root_to(&mut writer, partial),
+                    None => Ok(()),
+                };
+                partial_result.and_then(|()| Err(Error::invalid(error.to_string())))
+            }
+        };
         self.offset = writer.get_offset();
         result
     }

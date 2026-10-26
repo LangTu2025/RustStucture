@@ -1326,17 +1326,71 @@ fn nbt_encoder_matches_go_scalar_compound_tags_and_typed_empty_containers() {
     assert_eq!(empty_arrays, [7, 0, 0, 11, 0, 0, 12, 0, 0, 9, 0, 1, 0]);
 
     let mut invalid_key = Vec::new();
-    assert!(nbt::Encoder::new(&mut invalid_key)
+    assert_eq!(nbt::Encoder::new(&mut invalid_key)
         .encode(&BTreeMap::from([(1i32, 2i32)]))
         .unwrap_err()
-        .to_string()
-        .contains("NBT map key must be a string"));
+        .to_string(), "nbt: 值类型 map[int32]int32（）无法转换为 NBT 标签");
+    assert_eq!(invalid_key, [10, 0]);
     let mut unsupported = Vec::new();
-    assert!(nbt::Encoder::new(&mut unsupported)
+    assert_eq!(nbt::Encoder::new(&mut unsupported)
         .encode(&1i8)
         .unwrap_err()
-        .to_string()
-        .contains("int8"));
+        .to_string(), "nbt: 值类型 int8（）无法转换为 NBT 标签");
+
+    #[derive(Serialize)]
+    struct Partial {
+        good: i32,
+        bad: i8,
+    }
+    let mut partial_bytes = Vec::new();
+    assert_eq!(nbt::Encoder::new(&mut partial_bytes)
+        .encode(&Partial { good: 1, bad: 2 })
+        .unwrap_err()
+        .to_string(), "nbt: 值类型 int8（bad）无法转换为 NBT 标签");
+    assert_eq!(
+        partial_bytes,
+        [10, 0, 3, 4, b'g', b'o', b'o', b'd', 2]
+    );
+
+    #[derive(Serialize)]
+    struct Inner {
+        good: i32,
+        bad: i8,
+    }
+    #[derive(Serialize)]
+    struct Nested {
+        nested: Inner,
+    }
+    let mut nested_bytes = Vec::new();
+    assert!(nbt::Encoder::new(&mut nested_bytes)
+        .encode(&Nested {
+            nested: Inner { good: 1, bad: 2 },
+        })
+        .is_err());
+    assert_eq!(
+        nested_bytes,
+        [
+            10, 0, 10, 6, b'n', b'e', b's', b't', b'e', b'd', 3, 4, b'g', b'o', b'o', b'd', 2,
+        ]
+    );
+
+    #[derive(Serialize)]
+    struct ListRoot {
+        items: Vec<Inner>,
+    }
+    let mut list_bytes = Vec::new();
+    assert!(nbt::Encoder::new(&mut list_bytes)
+        .encode(&ListRoot {
+            items: vec![Inner { good: 1, bad: 2 }],
+        })
+        .is_err());
+    assert_eq!(
+        list_bytes,
+        [
+            10, 0, 9, 5, b'i', b't', b'e', b'm', b's', 10, 2, 3, 4, b'g', b'o', b'o', b'd', 2,
+        ]
+    );
+
     assert!(nbt::Encoder::new(Vec::new())
         .encode(&'x')
         .unwrap_err()
