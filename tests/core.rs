@@ -1301,6 +1301,49 @@ fn nbt_encoder_matches_go_scalar_compound_tags_and_typed_empty_containers() {
         .unwrap();
     assert_eq!(network_big, [10, 3, 0, 1, b'x', 0, 0, 0, 1, 0]);
 
+    for (encoding, expected) in [
+        (
+            Encoding::LittleEndian,
+            vec![5, 0, 0, 0, 0, 0xc0, 0x3f],
+        ),
+        (
+            Encoding::BigEndian,
+            vec![5, 0, 0, 0x3f, 0xc0, 0, 0],
+        ),
+        (
+            Encoding::NetworkLittleEndian,
+            vec![5, 0, 0, 0, 0xc0, 0x3f],
+        ),
+        (
+            Encoding::NetworkBigEndian,
+            vec![5, 0, 0, 0x3f, 0xc0, 0, 0],
+        ),
+    ] {
+        let mut output = Vec::new();
+        nbt::Encoder::with_encoding(&mut output, encoding)
+            .encode(&1.5f32)
+            .unwrap();
+        assert_eq!(output, expected, "{encoding:?}");
+    }
+
+    for encoding in [
+        Encoding::LittleEndian,
+        Encoding::BigEndian,
+        Encoding::NetworkLittleEndian,
+        Encoding::NetworkBigEndian,
+    ] {
+        let mut output = Vec::new();
+        nbt::Encoder::with_encoding(&mut output, encoding)
+            .encode(&nbt::RawString(vec![0xff]))
+            .unwrap();
+        let expected: &[u8] = match encoding {
+            Encoding::LittleEndian => &[8, 0, 0, 1, 0, 0xff],
+            Encoding::BigEndian | Encoding::NetworkBigEndian => &[8, 0, 0, 0, 1, 0xff],
+            Encoding::NetworkLittleEndian => &[8, 0, 1, 0xff],
+        };
+        assert_eq!(output, expected, "{encoding:?}");
+    }
+
     let mut default_writer = nbt::Encoder::new(Vec::new());
     default_writer.encode(&true).unwrap();
     default_writer.encode(&"x").unwrap();
@@ -1308,6 +1351,22 @@ fn nbt_encoder_matches_go_scalar_compound_tags_and_typed_empty_containers() {
         default_writer.into_inner(),
         [1, 0, 1, 8, 0, 1, b'x']
     );
+
+    let mut inferred_empty_list = Vec::new();
+    nbt::Encoder::new(&mut inferred_empty_list)
+        .encode(&Vec::<i32>::new())
+        .unwrap();
+    assert_eq!(inferred_empty_list, [9, 0, 3, 0]);
+    let mut inferred_empty_byte_list = Vec::new();
+    nbt::Encoder::new(&mut inferred_empty_byte_list)
+        .encode(&Vec::<u8>::new())
+        .unwrap();
+    assert_eq!(inferred_empty_byte_list, [9, 0, 1, 0]);
+    let mut inferred_empty_array = Vec::new();
+    nbt::Encoder::new(&mut inferred_empty_array)
+        .encode(&[0u8; 0])
+        .unwrap();
+    assert_eq!(inferred_empty_array, [7, 0, 0]);
 
     let mut empty_arrays = Vec::new();
     let mut encoder = nbt::Encoder::new(&mut empty_arrays);
@@ -1391,11 +1450,9 @@ fn nbt_encoder_matches_go_scalar_compound_tags_and_typed_empty_containers() {
         ]
     );
 
-    assert!(nbt::Encoder::new(Vec::new())
-        .encode(&'x')
-        .unwrap_err()
-        .to_string()
-        .contains("Rust char"));
+    let mut rune_bytes = Vec::new();
+    nbt::Encoder::new(&mut rune_bytes).encode(&'x').unwrap();
+    assert_eq!(rune_bytes, [3, 0, 240, 1]);
     #[derive(Serialize)]
     struct Empty;
     let mut empty_struct = Vec::new();
@@ -1406,6 +1463,63 @@ fn nbt_encoder_matches_go_scalar_compound_tags_and_typed_empty_containers() {
         .unwrap_err()
         .to_string()
         .contains("unit"));
+
+    #[derive(Serialize)]
+    struct UnsupportedArray {
+        values: [i16; 2],
+    }
+    let mut unsupported_array = Vec::new();
+    assert!(nbt::Encoder::new(&mut unsupported_array)
+        .encode(&UnsupportedArray { values: [1, 2] })
+        .is_err());
+    assert_eq!(unsupported_array, [10, 0]);
+    let mut unsupported_array_root = Vec::new();
+    assert_eq!(
+        nbt::Encoder::new(&mut unsupported_array_root)
+            .encode(&[1i16, 2])
+            .unwrap_err()
+            .to_string(),
+        "nbt: 值类型 [2]int16（）无法转换为 NBT 标签"
+    );
+    assert!(unsupported_array_root.is_empty());
+    let mut unsupported_slice_root = Vec::new();
+    assert_eq!(
+        nbt::Encoder::new(&mut unsupported_slice_root)
+            .encode(&vec![1i8, 2])
+            .unwrap_err()
+            .to_string(),
+        "nbt: 值类型 []int8（）无法转换为 NBT 标签"
+    );
+    assert_eq!(unsupported_slice_root, [9, 0]);
+
+    struct FailOnWrite {
+        calls: usize,
+        fail_at: usize,
+        bytes: Vec<u8>,
+    }
+    impl std::io::Write for FailOnWrite {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if self.calls == self.fail_at {
+                return Err(std::io::Error::other("boom"));
+            }
+            self.calls += 1;
+            self.bytes.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut failed_writer = nbt::Encoder::new(FailOnWrite {
+        calls: 0,
+        fail_at: 2,
+        bytes: Vec::new(),
+    });
+    assert_eq!(
+        failed_writer.encode(&1i32).unwrap_err().to_string(),
+        "nbt: 在偏移 2 的操作 'WriteInt32' 写入失败: boom"
+    );
+    assert_eq!(failed_writer.into_inner().bytes, [3, 0]);
 }
 
 #[test]

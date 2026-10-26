@@ -1,4 +1,4 @@
-use super::{Encoding, Writer};
+use super::Encoding;
 use crate::{Error, Result};
 use serde::ser::{self, Impossible, Serialize};
 use std::io::Write;
@@ -14,6 +14,7 @@ pub(super) enum Value {
     Double(f64),
     ByteArray(Vec<u8>),
     String(String),
+    RawString(Vec<u8>),
     List(u8, Vec<Value>),
     Compound(Vec<(String, Value)>),
     IntArray(Vec<i32>),
@@ -31,6 +32,7 @@ impl Value {
             Self::Double(_) => 6,
             Self::ByteArray(_) => 7,
             Self::String(_) => 8,
+            Self::RawString(_) => 8,
             Self::List(_, _) => 9,
             Self::Compound(_) => 10,
             Self::IntArray(_) => 11,
@@ -45,6 +47,7 @@ struct SerError {
     incompatible_type: Option<String>,
     value_name: Option<String>,
     partial: Option<PartialValue>,
+    depth_leak: usize,
 }
 
 #[derive(Debug)]
@@ -76,6 +79,7 @@ impl SerError {
             incompatible_type: None,
             value_name: None,
             partial: None,
+            depth_leak: 0,
         }
     }
 
@@ -113,8 +117,7 @@ impl ser::Error for SerError {
 type SerResult<T> = std::result::Result<T, SerError>;
 
 fn go_type_name<T: ?Sized>() -> String {
-    let rust_name = std::any::type_name::<T>();
-    let rust_name = rust_name.strip_prefix('&').unwrap_or(rust_name);
+    let rust_name = rust_type_name(std::any::type_name::<T>());
     match rust_name {
         "bool" => "bool".into(),
         "u8" => "uint8".into(),
@@ -134,15 +137,109 @@ fn go_type_name<T: ?Sized>() -> String {
     }
 }
 
-#[derive(Clone, Copy)]
+fn rust_type_name(mut name: &str) -> &str {
+    while let Some(rest) = name.strip_prefix('&') {
+        name = rest.trim_start();
+        if let Some(rest) = name.strip_prefix("mut ") {
+            name = rest;
+        }
+    }
+    name
+}
+
+fn generic_inner<'a>(name: &'a str, path: &str) -> Option<&'a str> {
+    let inner = name.strip_prefix(path)?.strip_prefix('<')?;
+    inner.strip_suffix('>')
+}
+
+fn static_tag(name: &str) -> Option<u8> {
+    let name = rust_type_name(name);
+    match name {
+        "bool" | "u8" => Some(1),
+        "i16" => Some(2),
+        "i32" => Some(3),
+        "i64" => Some(4),
+        "f32" => Some(5),
+        "f64" => Some(6),
+        "alloc::string::String" | "std::string::String" | "&str" => Some(8),
+        _ if name.starts_with("[") => static_array(name).0,
+        _ if name.starts_with("alloc::vec::Vec<") || name.starts_with("std::vec::Vec<") => Some(9),
+        _ if name.starts_with("std::collections::") => Some(10),
+        _ => None,
+    }
+}
+
+fn static_list_tag(name: &str) -> Option<u8> {
+    let name = rust_type_name(name);
+    let element =
+        generic_inner(name, "alloc::vec::Vec").or_else(|| generic_inner(name, "std::vec::Vec"))?;
+    static_tag(element)
+}
+
+fn static_array(name: &str) -> (Option<u8>, Option<String>) {
+    let name = rust_type_name(name);
+    let Some(inner) = name
+        .strip_prefix('[')
+        .and_then(|name| name.strip_suffix(']'))
+    else {
+        return (None, None);
+    };
+    let Some((element, length)) = inner.rsplit_once(';') else {
+        return (None, None);
+    };
+    let Ok(length) = length.trim().parse::<usize>() else {
+        return (None, None);
+    };
+    let tag = match rust_type_name(element.trim()) {
+        "u8" => Some(7),
+        "i32" => Some(11),
+        "i64" => Some(12),
+        _ => None,
+    };
+    let type_name = if let Some(tag) = tag {
+        let element_name = match tag {
+            7 => "uint8",
+            11 => "int32",
+            _ => "int64",
+        };
+        Some(format!("[{length}]{element_name}"))
+    } else {
+        Some(format!("[{length}]{}", go_type_name_text(element.trim())))
+    };
+    (tag, type_name)
+}
+
+fn go_type_name_text(name: &str) -> &str {
+    match rust_type_name(name) {
+        "bool" => "bool",
+        "u8" => "uint8",
+        "i8" => "int8",
+        "i16" => "int16",
+        "i32" => "int32",
+        "i64" => "int64",
+        "u16" => "uint16",
+        "u32" => "uint32",
+        "u64" => "uint64",
+        "f32" => "float32",
+        "f64" => "float64",
+        value => value,
+    }
+}
+
 struct Serializer {
     expected_list_tag: Option<u8>,
+    expected_array_tag: Option<u8>,
+    expected_array_type: Option<String>,
 }
 
 impl Serializer {
     fn encode<T: ?Sized + Serialize>(value: &T) -> SerResult<Value> {
+        let type_name = std::any::type_name::<T>();
+        let (expected_array_tag, expected_array_type) = static_array(type_name);
         value.serialize(Self {
-            expected_list_tag: None,
+            expected_list_tag: static_list_tag(type_name),
+            expected_array_tag,
+            expected_array_type,
         })
     }
 }
@@ -152,6 +249,8 @@ struct Sequence {
     tuple: bool,
     expected_tag: Option<u8>,
     declared_len: Option<usize>,
+    expected_array_tag: Option<u8>,
+    expected_array_type: Option<String>,
 }
 
 impl Sequence {
@@ -162,6 +261,16 @@ impl Sequence {
                 Ok(())
             }
             Err(mut error) => {
+                if self.tuple {
+                    if let Some(type_name) = error.incompatible_type.take() {
+                        error.incompatible_type =
+                            Some(format!("[{}]{type_name}", self.declared_len.unwrap_or(0)));
+                    }
+                    return Err(error);
+                }
+                if !self.tuple {
+                    error.depth_leak += 1;
+                }
                 if let Some(type_name) = error.incompatible_type.take() {
                     error.incompatible_type = Some(if self.tuple {
                         format!("[{}]{type_name}", self.declared_len.unwrap_or(0))
@@ -169,9 +278,7 @@ impl Sequence {
                         format!("[]{type_name}")
                     });
                 }
-                let prefix_written = self.expected_tag.is_some()
-                    || !self.values.is_empty()
-                    || error.partial.is_some();
+                let prefix_written = !self.values.is_empty() || error.partial.is_some();
                 let tag = self
                     .expected_tag
                     .or_else(|| self.values.first().map(Value::tag))
@@ -197,12 +304,27 @@ impl Sequence {
 
     fn finish(self) -> SerResult<Value> {
         if self.tuple {
+            if self.values.is_empty() {
+                return match self.expected_array_tag {
+                    Some(7) => Ok(Value::ByteArray(Vec::new())),
+                    Some(11) => Ok(Value::IntArray(Vec::new())),
+                    Some(12) => Ok(Value::LongArray(Vec::new())),
+                    _ => Err(SerError::incompatible(
+                        self.expected_array_type
+                            .unwrap_or_else(|| "[0]struct".to_string()),
+                    )),
+                };
+            }
             let first = self.values.first().map(Value::tag);
             if let Some(tag) = first {
                 if self.values.iter().all(|value| value.tag() == tag) {
                     match tag {
                         1 => {
-                            if !self.values.iter().all(|value| matches!(value, Value::Byte(_))) {
+                            if !self
+                                .values
+                                .iter()
+                                .all(|value| matches!(value, Value::Byte(_)))
+                            {
                                 return Err(SerError::new("unsupported Go NBT array element type"));
                             }
                             return Ok(Value::ByteArray(
@@ -240,7 +362,26 @@ impl Sequence {
                         _ => {}
                     }
                 }
-                return Err(SerError::new("unsupported Go NBT array element type"));
+                let element_type = match self.values.first() {
+                    Some(Value::Bool(_)) => "bool",
+                    Some(Value::Short(_)) => "int16",
+                    Some(Value::Float(_)) => "float32",
+                    Some(Value::Double(_)) => "float64",
+                    Some(Value::String(_)) | Some(Value::RawString(_)) => "string",
+                    Some(Value::List(_, _)) => "slice",
+                    Some(Value::Compound(_)) => "struct",
+                    Some(Value::Byte(_)) => "uint8",
+                    Some(Value::Int(_)) => "int32",
+                    Some(Value::Long(_)) => "int64",
+                    Some(Value::ByteArray(_)) => "[ ]uint8",
+                    Some(Value::IntArray(_)) => "[ ]int32",
+                    Some(Value::LongArray(_)) => "[ ]int64",
+                    None => unreachable!(),
+                };
+                return Err(SerError::incompatible(format!(
+                    "[{}]{element_type}",
+                    self.declared_len.unwrap_or(0)
+                )));
             }
         }
         let tag = self
@@ -306,9 +447,9 @@ impl ser::SerializeMap for MapBuilder {
                 Ok(())
             }
             _ => {
-                let mut error = SerError::incompatible(
-                    self.map_type.clone().unwrap_or_else(|| "map".into()),
-                );
+                let mut error =
+                    SerError::incompatible(self.map_type.clone().unwrap_or_else(|| "map".into()));
+                error.depth_leak += 1;
                 error.partial = Some(PartialValue::Compound(
                     self.fields
                         .drain(..)
@@ -330,6 +471,7 @@ impl ser::SerializeMap for MapBuilder {
                 Ok(())
             }
             Err(mut error) => {
+                error.depth_leak += 1;
                 if error.value_name.is_none() {
                     error.value_name = Some(key.clone());
                 }
@@ -377,6 +519,7 @@ impl ser::SerializeStruct for MapBuilder {
                 Ok(())
             }
             Err(mut error) => {
+                error.depth_leak += 1;
                 if error.value_name.is_none() {
                     error.value_name = Some(key.to_string());
                 }
@@ -448,9 +591,7 @@ impl ser::Serializer for Serializer {
         Ok(Value::Double(value))
     }
     fn serialize_char(self, value: char) -> SerResult<Value> {
-        Err(SerError::new(format!(
-            "unsupported Go NBT kind: Rust char ({value:?})"
-        )))
+        Ok(Value::Int(value as u32 as i32))
     }
     fn serialize_str(self, value: &str) -> SerResult<Value> {
         Ok(Value::String(value.to_string()))
@@ -481,12 +622,28 @@ impl ser::Serializer for Serializer {
         name: &'static str,
         value: &T,
     ) -> SerResult<Value> {
+        if name == "NbtRawString" {
+            let value = value.serialize(self)?;
+            let Value::List(1, values) = value else {
+                return Err(SerError::new("invalid raw NBT string"));
+            };
+            return values
+                .into_iter()
+                .map(|value| match value {
+                    Value::Byte(value) => Ok(value),
+                    _ => Err(SerError::new("invalid raw NBT string byte")),
+                })
+                .collect::<SerResult<Vec<_>>>()
+                .map(Value::RawString);
+        }
         if let Some(tag) = name
             .strip_prefix("NbtTypedList_")
             .and_then(|tag| tag.parse::<u8>().ok())
         {
             return value.serialize(Self {
                 expected_list_tag: Some(tag),
+                expected_array_tag: None,
+                expected_array_type: None,
             });
         }
         if let Some(tag) = name
@@ -515,9 +672,7 @@ impl ser::Serializer for Serializer {
                     .into_iter()
                     .map(|value| match value {
                         Value::Byte(byte) => Ok(byte),
-                        _ => Err(SerError::new(
-                            "typed NBT byte array element type mismatch",
-                        )),
+                        _ => Err(SerError::new("typed NBT byte array element type mismatch")),
                     })
                     .collect::<SerResult<Vec<_>>>()
                     .map(Value::ByteArray),
@@ -533,9 +688,7 @@ impl ser::Serializer for Serializer {
                     .into_iter()
                     .map(|value| match value {
                         Value::Long(number) => Ok(number),
-                        _ => Err(SerError::new(
-                            "typed NBT long array element type mismatch",
-                        )),
+                        _ => Err(SerError::new("typed NBT long array element type mismatch")),
                     })
                     .collect::<SerResult<Vec<_>>>()
                     .map(Value::LongArray),
@@ -559,6 +712,8 @@ impl ser::Serializer for Serializer {
             tuple: false,
             expected_tag: self.expected_list_tag,
             declared_len: len,
+            expected_array_tag: self.expected_array_tag,
+            expected_array_type: self.expected_array_type,
         })
     }
     fn serialize_tuple(self, len: usize) -> SerResult<Sequence> {
@@ -567,6 +722,8 @@ impl ser::Serializer for Serializer {
             tuple: true,
             expected_tag: None,
             declared_len: Some(len),
+            expected_array_tag: self.expected_array_tag,
+            expected_array_type: self.expected_array_type,
         })
     }
     fn serialize_tuple_struct(self, _: &'static str, len: usize) -> SerResult<Sequence> {
@@ -606,6 +763,287 @@ impl ser::Serializer for Serializer {
     }
 }
 
+struct EncoderOutput<'a, W> {
+    writer: super::OffsetWriter<super::IoWriteSink<&'a mut W>>,
+    encoding: Encoding,
+    depth: usize,
+}
+
+impl<'a, W: Write> EncoderOutput<'a, W> {
+    fn new(writer: &'a mut W, encoding: Encoding, offset: u64, depth: usize) -> Self {
+        Self {
+            writer: super::OffsetWriter::with_offset(super::IoWriteSink::new(writer), offset),
+            encoding,
+            depth,
+        }
+    }
+
+    fn offset(&self) -> u64 {
+        self.writer.get_offset()
+    }
+
+    fn depth(&self) -> usize {
+        self.depth
+    }
+
+    fn write_byte(&mut self, value: u8) -> Result<()> {
+        let (written, error) = self.writer.write(&[value]);
+        if let Some(error) = error {
+            return Err(Error::Io(error));
+        }
+        if written != 1 {
+            return Err(Error::Io(std::io::Error::other("short write")));
+        }
+        Ok(())
+    }
+
+    fn write_fixed(&mut self, bytes: &[u8], op: &str) -> Result<()> {
+        let (_, error) = self.writer.write(bytes);
+        if let Some(error) = error {
+            return Err(self.failed(op, error));
+        }
+        Ok(())
+    }
+
+    fn write_network_varint(&mut self, mut value: u64) -> Result<()> {
+        while value >= 0x80 {
+            self.write_byte(value as u8 | 0x80)?;
+            value >>= 7;
+        }
+        self.write_byte(value as u8)
+    }
+
+    fn write_i16(&mut self, value: i16) -> Result<()> {
+        let bytes = if self.encoding.le() {
+            value.to_le_bytes()
+        } else {
+            value.to_be_bytes()
+        };
+        self.write_fixed(&bytes, "WriteInt16")
+    }
+
+    fn write_i32(&mut self, value: i32) -> Result<()> {
+        if self.encoding.net() {
+            let zigzag = ((value as u32) << 1) ^ ((value >> 31) as u32);
+            let mut encoded = zigzag as u64;
+            while encoded >= 0x80 {
+                if let Err(error) = self.write_byte(encoded as u8 | 0x80) {
+                    return Err(self.failed("WriteInt32", error));
+                }
+                encoded >>= 7;
+            }
+            return self
+                .write_byte(encoded as u8)
+                .map_err(|error| self.failed("WriteInt32", error));
+        }
+        let bytes = if self.encoding.le() {
+            value.to_le_bytes()
+        } else {
+            value.to_be_bytes()
+        };
+        self.write_fixed(&bytes, "WriteInt32")
+    }
+
+    fn write_i64(&mut self, value: i64) -> Result<()> {
+        if self.encoding.net() {
+            let zigzag = ((value as u64) << 1) ^ ((value >> 63) as u64);
+            let mut encoded = zigzag;
+            while encoded >= 0x80 {
+                if let Err(error) = self.write_byte(encoded as u8 | 0x80) {
+                    return Err(self.failed("WriteInt64", error));
+                }
+                encoded >>= 7;
+            }
+            return self
+                .write_byte(encoded as u8)
+                .map_err(|error| self.failed("WriteInt64", error));
+        }
+        let bytes = if self.encoding.le() {
+            value.to_le_bytes()
+        } else {
+            value.to_be_bytes()
+        };
+        self.write_fixed(&bytes, "WriteInt64")
+    }
+
+    fn write_string(&mut self, value: &str) -> Result<()> {
+        self.write_string_bytes(value.as_bytes())
+    }
+
+    fn write_string_bytes(&mut self, value: &[u8]) -> Result<()> {
+        let offset = self.offset();
+        if value.len() > i16::MAX as usize {
+            return Err(Error::Other(format!(
+                "nbt: 偏移 {offset} 的字符串无效: 字符串长度超过最大限制（长度={}）",
+                value.len()
+            )));
+        }
+        if self.encoding.net() {
+            self.write_network_varint(value.len() as u64)
+                .map_err(|error| self.failed("WriteString", error))?;
+        } else {
+            self.write_i16(value.len() as i16)
+                .map_err(|error| self.failed("WriteString", error))?;
+        }
+        if !value.is_empty() {
+            let (_, error) = self.writer.write(value);
+            if let Some(error) = error {
+                return Err(self.failed("WriteString", error));
+            }
+        }
+        Ok(())
+    }
+
+    fn write_tag(&mut self, value: &Value, name: &str) -> Result<()> {
+        if self.depth >= 512 {
+            return Err(Error::Other("nbt: 达到最大嵌套深度 512".into()));
+        }
+        self.write_byte(value.tag())?;
+        if !(self.encoding == Encoding::NetworkBigEndian && value.tag() == 10 && self.depth == 0) {
+            self.write_string(name)?;
+        }
+        Ok(())
+    }
+
+    fn write_root(&mut self, value: &Value) -> Result<()> {
+        self.write_tag(value, "")?;
+        self.write_payload(value)
+    }
+
+    fn write_partial_root(&mut self, value: &PartialValue) -> Result<()> {
+        let tag = value.tag();
+        if self.depth >= 512 {
+            return Err(Error::Other("nbt: 达到最大嵌套深度 512".into()));
+        }
+        self.write_byte(tag)?;
+        if !(self.encoding == Encoding::NetworkBigEndian && tag == 10 && self.depth == 0) {
+            self.write_string("")?;
+        }
+        self.write_partial_payload(value)
+    }
+
+    fn write_payload(&mut self, value: &Value) -> Result<()> {
+        match value {
+            Value::Bool(value) => self.write_byte(u8::from(*value)),
+            Value::Byte(value) => self.write_byte(*value),
+            Value::Short(value) => self.write_i16(*value),
+            Value::Int(value) => self.write_i32(*value),
+            Value::Long(value) => self.write_i64(*value),
+            Value::Float(value) => {
+                let bytes = if self.encoding.le() {
+                    value.to_bits().to_le_bytes()
+                } else {
+                    value.to_bits().to_be_bytes()
+                };
+                self.write_fixed(&bytes, "WriteFloat32")
+            }
+            Value::Double(value) => {
+                let bytes = if self.encoding.le() {
+                    value.to_bits().to_le_bytes()
+                } else {
+                    value.to_bits().to_be_bytes()
+                };
+                self.write_fixed(&bytes, "WriteFloat64")
+            }
+            Value::String(value) => self.write_string(value),
+            Value::RawString(value) => self.write_string_bytes(value),
+            Value::ByteArray(values) => {
+                self.write_i32(values.len() as i32)?;
+                let (_, error) = self.writer.write(values);
+                match error {
+                    Some(error) => Err(self.failed("WriteByteArray", error)),
+                    None => Ok(()),
+                }
+            }
+            Value::IntArray(values) => {
+                self.write_i32(values.len() as i32)?;
+                for value in values {
+                    self.write_i32(*value)?;
+                }
+                Ok(())
+            }
+            Value::LongArray(values) => {
+                self.write_i32(values.len() as i32)?;
+                for value in values {
+                    self.write_i64(*value)?;
+                }
+                Ok(())
+            }
+            Value::List(tag, values) => {
+                self.depth += 1;
+                let result = (|| {
+                    if let Err(error) = self.write_byte(*tag) {
+                        return Err(self.failed("WriteSlice", error));
+                    }
+                    self.write_i32(values.len() as i32)?;
+                    for value in values {
+                        self.write_payload(value)?;
+                    }
+                    Ok(())
+                })();
+                if result.is_ok() {
+                    self.depth -= 1;
+                }
+                result
+            }
+            Value::Compound(fields) => {
+                self.depth += 1;
+                for (name, value) in fields {
+                    self.write_tag(value, name)?;
+                    self.write_payload(value)?;
+                }
+                self.depth -= 1;
+                self.write_byte(0)
+            }
+        }
+    }
+
+    fn write_partial_payload(&mut self, value: &PartialValue) -> Result<()> {
+        match value {
+            PartialValue::Complete(value) => self.write_payload(value),
+            PartialValue::Compound(fields) => {
+                self.depth += 1;
+                for (name, value) in fields {
+                    let tag = value.tag();
+                    if self.depth >= 512 {
+                        return Err(Error::Other("nbt: 达到最大嵌套深度 512".into()));
+                    }
+                    self.write_byte(tag)?;
+                    self.write_string(name)?;
+                    self.write_partial_payload(value)?;
+                }
+                Ok(())
+            }
+            PartialValue::List {
+                tag,
+                len,
+                values,
+                prefix_written,
+            } => {
+                if !prefix_written {
+                    return Ok(());
+                }
+                self.depth += 1;
+                if let Err(error) = self.write_byte(*tag) {
+                    return Err(self.failed("WriteSlice", error));
+                }
+                self.write_i32(*len as i32)?;
+                for value in values {
+                    self.write_partial_payload(value)?;
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn failed(&self, op: &str, error: impl std::fmt::Display) -> Error {
+        Error::Other(format!(
+            "nbt: 在偏移 {} 的操作 '{op}' 写入失败: {error}",
+            self.offset()
+        ))
+    }
+}
+
 /// Marks an empty or dynamically typed Rust sequence with its Go-compatible NBT element tag.
 pub struct TypedList<T> {
     pub element_tag: u8,
@@ -615,6 +1053,22 @@ pub struct TypedList<T> {
 pub struct TypedArray<T> {
     pub element_tag: u8,
     pub values: Vec<T>,
+}
+
+pub struct RawString(pub Vec<u8>);
+
+struct RawBytes<'a>(&'a [u8]);
+
+impl Serialize for RawBytes<'_> {
+    fn serialize<S: ser::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        serializer.serialize_bytes(self.0)
+    }
+}
+
+impl Serialize for RawString {
+    fn serialize<S: ser::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        serializer.serialize_newtype_struct("NbtRawString", &RawBytes(&self.0))
+    }
 }
 
 impl<T> TypedArray<T> {
@@ -677,6 +1131,7 @@ pub struct Encoder<W> {
     writer: W,
     encoding: Encoding,
     offset: u64,
+    depth: usize,
 }
 
 impl<W: Write> Encoder<W> {
@@ -685,6 +1140,7 @@ impl<W: Write> Encoder<W> {
             writer,
             encoding: Encoding::NetworkLittleEndian,
             offset: 0,
+            depth: 0,
         }
     }
     pub fn with_encoding(writer: W, encoding: Encoding) -> Self {
@@ -692,25 +1148,32 @@ impl<W: Write> Encoder<W> {
             writer,
             encoding,
             offset: 0,
+            depth: 0,
         }
     }
     pub fn encode<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<()> {
-        let mut writer = super::OffsetWriter::with_offset(
-            super::IoWriteSink::new(&mut self.writer),
-            self.offset,
-        );
-        let encoder = Writer::new(self.encoding);
+        let base_depth = self.depth;
+        let mut encoder =
+            EncoderOutput::new(&mut self.writer, self.encoding, self.offset, self.depth);
         let result = match Serializer::encode(value) {
-            Ok(encoded) => encoder.write_encoded_root_to(&mut writer, &encoded),
+            Ok(encoded) => encoder.write_root(&encoded),
             Err(error) => {
                 let partial_result = match error.partial.as_ref() {
-                    Some(partial) => encoder.write_partial_encoded_root_to(&mut writer, partial),
+                    Some(partial) => encoder.write_partial_root(partial),
                     None => Ok(()),
                 };
-                partial_result.and_then(|()| Err(Error::invalid(error.to_string())))
+                if partial_result.is_ok() {
+                    self.depth = base_depth + error.depth_leak;
+                } else {
+                    self.depth = encoder.depth();
+                }
+                partial_result.and_then(|()| Err(Error::invalid(error.display_message())))
             }
         };
-        self.offset = writer.get_offset();
+        self.offset = encoder.offset();
+        if result.is_ok() {
+            self.depth = encoder.depth();
+        }
         result
     }
     pub fn into_inner(self) -> W {
