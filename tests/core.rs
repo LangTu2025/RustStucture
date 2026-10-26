@@ -1292,6 +1292,41 @@ fn nbt_encoder_matches_go_scalar_compound_tags_and_typed_empty_containers() {
     );
 
     #[derive(Serialize)]
+    struct Embedded {
+        embedded: i16,
+    }
+    #[derive(Serialize)]
+    struct GoTagged {
+        #[serde(rename = "renamed")]
+        value: i32,
+        #[allow(dead_code)]
+        #[serde(skip)]
+        ignored: i32,
+        #[serde(skip_serializing_if = "nbt::is_default")]
+        zero: i32,
+        #[serde(flatten)]
+        embedded: Embedded,
+    }
+    let mut go_tagged = Vec::new();
+    nbt::Encoder::new(&mut go_tagged)
+        .encode(&GoTagged {
+            value: 1,
+            ignored: 2,
+            zero: 0,
+            embedded: Embedded { embedded: 3 },
+        })
+        .unwrap();
+    assert_eq!(
+        go_tagged,
+        [
+            10, 0,
+            3, 7, b'r', b'e', b'n', b'a', b'm', b'e', b'd', 2,
+            2, 8, b'e', b'm', b'b', b'e', b'd', b'd', b'e', b'd', 3, 0,
+            0,
+        ]
+    );
+
+    #[derive(Serialize)]
     struct Root {
         x: i32,
     }
