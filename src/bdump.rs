@@ -412,14 +412,16 @@ pub fn verify_stream(bytes: &[u8]) -> Result<SignatureStatus> {
         return Ok(status);
     }
     if signature.len() < 4 {
-        return Err(Error::invalid("BDX 证书长度截断"));
+        status.corrupted = true;
+        return Ok(status);
     }
     let cert_length = usize::from(u16::from_le_bytes(signature[2..4].try_into().unwrap()));
     let cert_end = 4usize
         .checked_add(cert_length)
         .ok_or_else(|| Error::invalid("BDX 证书长度溢出"))?;
     let Some(certificate) = signature.get(4..cert_end) else {
-        return Err(Error::invalid("BDX 证书截断"));
+        status.corrupted = true;
+        return Ok(status);
     };
     let certificate =
         std::str::from_utf8(certificate).map_err(|_| Error::invalid("BDX 证书不是UTF-8"))?;
