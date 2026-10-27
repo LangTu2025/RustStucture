@@ -382,7 +382,7 @@ pub fn verify_stream(bytes: &[u8]) -> Result<SignatureStatus> {
     }
     let length_byte = bytes[bytes.len() - 2];
     let (length, trailer) = if length_byte == 255 {
-        if bytes.len() < 5 {
+        if bytes.len() < 4 {
             return Err(Error::invalid("BDX 长签名尾部截断"));
         }
         (
@@ -394,6 +394,9 @@ pub fn verify_stream(bytes: &[u8]) -> Result<SignatureStatus> {
     } else {
         (usize::from(length_byte), 2)
     };
+    if trailer == 4 && length >= bytes.len() - trailer {
+        return Err(Error::invalid("Too long signature"));
+    }
     let sign_at = bytes
         .len()
         .checked_sub(length + trailer)

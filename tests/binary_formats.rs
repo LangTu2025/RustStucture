@@ -371,7 +371,16 @@ fn bdx_auxiliary_commands_and_signature_bounds() {
     assert_eq!(reader.read().unwrap(), Some(Command::Terminate));
     assert!(!verify_stream(b"BDX\0\0XE").unwrap().signed);
     assert!(verify_stream(&[90]).is_err());
-    assert!(verify_stream(&[88, 1, 255, 90]).is_err());
+    assert_eq!(
+        verify_stream(&[88, 1, 255, 90]).unwrap_err().to_string(),
+        "Too long signature"
+    );
+    assert_eq!(
+        verify_stream(&[65, 66, 0, 2, 255, 90])
+            .unwrap_err()
+            .to_string(),
+        "Too long signature"
+    );
     let legacy = verify_stream(&[65, 88, 1, 2, 2, 90]).unwrap();
     assert!(legacy.signed && legacy.legacy && !legacy.corrupted);
     assert_eq!(
