@@ -205,6 +205,24 @@ fn bdx_encoder_uses_go_shortest_movement_opcodes() {
 }
 
 #[test]
+fn bdx_brotli_output_matches_go_default_compressor() {
+    use std::io::Write;
+
+    let body = b"BDX\0\0\x01minecraft:stone\0\x01[]\0\x05\0\0\0\x01XE";
+    let mut compressed = Vec::new();
+    {
+        let mut writer = brotli::CompressorWriter::new(&mut compressed, 4096, 6, 22);
+        writer.write_all(body).unwrap();
+    }
+
+    assert_eq!(
+        compressed,
+        hex::decode("0b10804244580000016d696e6563726166743a73746f6e6500015b5d000500000001584503")
+            .unwrap()
+    );
+}
+
+#[test]
 fn bdx_preserves_command_mode_from_raw_nbt_in_decode_and_direct_import() {
     use rust_water_structure::world::cache::CachedWorld;
     let mut wire = b"BDX\0fixture\0\x01chain_command_block\0\x01[]\0".to_vec();
