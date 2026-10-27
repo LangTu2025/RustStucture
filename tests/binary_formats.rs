@@ -102,6 +102,109 @@ fn bdx_reads_constant_legacy_and_signed_movements() {
 }
 
 #[test]
+fn bdx_encoder_uses_go_shortest_movement_opcodes() {
+    use rust_water_structure::bdump::{Command, CommandReader};
+    use rust_water_structure::{Block, BlockState, StructureData};
+    use std::io::Read;
+
+    let mut data = StructureData::new(FormatId::BDX);
+    let boundaries = [0, 1, 3, 130, 258, 33_025, 65_793];
+    for y in boundaries {
+        data.insert(Pos(0, y, 0), Block::new(BlockState::new("stone")));
+    }
+    for z in boundaries {
+        data.insert(Pos(0, 0, z), Block::new(BlockState::new("stone")));
+    }
+    for (y, z_values) in [
+        (65_787, &[0, 1][..]),
+        (65_788, &[0, 2][..]),
+        (65_789, &[0, 128][..]),
+        (65_790, &[0, 129][..]),
+        (65_791, &[0, 32_768][..]),
+        (65_792, &[0, 32_769][..]),
+        (65_793, &[0][..]),
+    ] {
+        for z in z_values {
+            data.insert(Pos(1, y, *z), Block::new(BlockState::new("stone")));
+        }
+    }
+    for (x, y) in [
+        (3, 65_792),
+        (130, 65_790),
+        (258, 65_663),
+        (33_025, 65_535),
+        (65_793, 65_406),
+    ] {
+        data.insert(Pos(x, y, 0), Block::new(BlockState::new("stone")));
+    }
+    data.size = Size(65_797, 65_794, 65_794);
+
+    let encoded = binary::encode(FormatId::BDX, &data).unwrap();
+    let mut body = Vec::new();
+    brotli::Decompressor::new(&encoded[3..], 4096)
+        .read_to_end(&mut body)
+        .unwrap();
+    assert!(body.starts_with(b"BDX\0\0"));
+
+    let mut reader = CommandReader::new(&body[5..]);
+    let mut movements = Vec::new();
+    loop {
+        let offset = reader.position;
+        let Some(command) = reader.read().unwrap() else {
+            break;
+        };
+        match command {
+            Command::Move { axis, delta } => {
+                let opcode = body[5 + offset];
+                movements.push((axis, delta, opcode));
+            }
+            Command::Terminate => break,
+            _ => {}
+        }
+    }
+
+    for expected in [
+        (0, 1, 14),
+        (0, 2, 28),
+        (0, 127, 28),
+        (0, 128, 20),
+        (0, 32_767, 20),
+        (0, 32_768, 21),
+        (1, 1, 16),
+        (1, 2, 29),
+        (1, 127, 29),
+        (1, 128, 22),
+        (1, 32_767, 22),
+        (1, 32_768, 23),
+        (1, -1, 17),
+        (1, -2, 29),
+        (1, -127, 29),
+        (1, -128, 29),
+        (1, -129, 22),
+        (2, 1, 18),
+        (2, 2, 30),
+        (2, 127, 30),
+        (2, 128, 24),
+        (2, 32_767, 24),
+        (2, 32_768, 25),
+        (2, -1, 19),
+        (2, -2, 30),
+        (2, -128, 30),
+        (2, -129, 24),
+        (2, -32_768, 24),
+        (2, -32_769, 25),
+        (0, 3, 28),
+        (1, 387, 22),
+        (2, 65_793, 25),
+    ] {
+        assert!(
+            movements.contains(&expected),
+            "missing movement {expected:?}"
+        );
+    }
+}
+
+#[test]
 fn bdx_preserves_command_mode_from_raw_nbt_in_decode_and_direct_import() {
     use rust_water_structure::world::cache::CachedWorld;
     let mut wire = b"BDX\0fixture\0\x01chain_command_block\0\x01[]\0".to_vec();

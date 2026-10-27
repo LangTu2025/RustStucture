@@ -55,6 +55,26 @@ fn runtime_state(pool: u8, index: u32) -> Result<BlockState> {
     Ok(crate::blocks::legacy(name, *aux))
 }
 
+fn write_movement(body: &mut Vec<u8>, axis: usize, delta: i32) {
+    if delta == 0 {
+        return;
+    }
+    if delta == 1 {
+        body.push(14 + axis as u8 * 2);
+    } else if delta == -1 {
+        body.push(15 + axis as u8 * 2);
+    } else if let Ok(value) = i8::try_from(delta) {
+        body.push(28 + axis as u8);
+        body.extend_from_slice(&value.to_be_bytes());
+    } else if let Ok(value) = i16::try_from(delta) {
+        body.push(20 + axis as u8 * 2);
+        body.extend_from_slice(&value.to_be_bytes());
+    } else {
+        body.push(21 + axis as u8 * 2);
+        body.extend_from_slice(&delta.to_be_bytes());
+    }
+}
+
 fn resolve(
     reference: BlockReference,
     constants: &[String],
@@ -476,8 +496,7 @@ pub(super) fn encode(data: &StructureData) -> Result<Vec<u8>> {
                 .checked_sub(brush[axis])
                 .ok_or_else(|| Error::invalid("BDX 坐标差值溢出"))?;
             if delta != 0 {
-                body.push([21, 23, 25][axis]);
-                body.extend_from_slice(&delta.to_be_bytes());
+                write_movement(&mut body, axis, delta);
                 brush[axis] = target;
             }
         }
@@ -506,8 +525,7 @@ pub(super) fn encode(data: &StructureData) -> Result<Vec<u8>> {
             .checked_sub(brush[axis])
             .ok_or_else(|| Error::invalid("BDX 坐标差值溢出"))?;
         if delta != 0 {
-            body.push([21, 23, 25][axis]);
-            body.extend_from_slice(&delta.to_be_bytes());
+            write_movement(&mut body, axis, delta);
             brush[axis] = target;
         }
     }
