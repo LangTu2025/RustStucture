@@ -431,6 +431,37 @@ fn bdx_non_utf8_v2_certificate_matches_go_corrupted_status() {
 }
 
 #[test]
+fn bdx_real_go_signatures_match_verified_usernames() {
+    use rust_water_structure::bdump::verify_stream;
+    use std::io::Read;
+
+    let directory =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../WaterStructure/test/测试文件");
+    if !directory.exists() {
+        return;
+    }
+    for (filename, expected_username) in [
+        ("nor实验室地图.bdx", "1593574682aaa"),
+        ("二维地皮(1) (2) (1).bdx", "liu319"),
+    ] {
+        let encoded = std::fs::read(directory.join(filename)).unwrap();
+        assert!(encoded.starts_with(b"BD@"), "{filename}");
+        let mut decompressed = Vec::new();
+        brotli::Decompressor::new(&encoded[3..], 4096)
+            .read_to_end(&mut decompressed)
+            .unwrap();
+        let status = verify_stream(&decompressed).unwrap();
+        assert!(status.signed && !status.corrupted, "{filename}");
+        assert_eq!(
+            status.username.as_deref(),
+            Some(expected_username),
+            "{filename}"
+        );
+        assert!(!status.legacy, "{filename}");
+    }
+}
+
+#[test]
 fn bdx_reads_117_pool_and_rejects_unknown_pool() {
     // 117池中 134 是 air，0 是 acacia_button:0，独立于当前 runtime ID 池。
     let wire = b"BDX\0\0\x1f\x75\x20\x00\x00XE";

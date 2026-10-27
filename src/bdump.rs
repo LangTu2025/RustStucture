@@ -209,6 +209,13 @@ pub struct SignatureStatus {
     pub legacy: bool,
 }
 
+fn go_username_field(content: &str) -> &str {
+    content
+        .split('|')
+        .nth(1)
+        .unwrap_or_else(|| panic!("BDX certificate username index out of range"))
+}
+
 fn write_string(output: &mut Vec<u8>, value: &str) -> Result<()> {
     if value.contains('\0') {
         return Err(Error::invalid("BDX 字符串包含 NUL"));
@@ -448,9 +455,7 @@ pub fn verify_stream(bytes: &[u8]) -> Result<SignatureStatus> {
                 &cert_signature,
             )
             .map_err(|e| Error::invalid(e.to_string()))?;
-        let (key, username) = content
-            .split_once('|')
-            .ok_or_else(|| Error::invalid("BDX 证书用户字段错误"))?;
+        let key = content.split('|').next().unwrap();
         let user_key =
             RsaPublicKey::from_pkcs1_pem(key).map_err(|e| Error::invalid(e.to_string()))?;
         user_key
@@ -460,11 +465,23 @@ pub fn verify_stream(bytes: &[u8]) -> Result<SignatureStatus> {
                 &signature[cert_end..],
             )
             .map_err(|e| Error::invalid(e.to_string()))?;
-        Ok(username.to_owned())
+        Ok(go_username_field(content).to_owned())
     };
     match validate() {
         Ok(username) => status.username = Some(username),
         Err(_) => status.corrupted = true,
     }
     Ok(status)
+}
+
+#[cfg(test)]
+mod signature_tests {
+    use super::go_username_field;
+
+    #[test]
+    fn username_field_matches_go_split_index() {
+        assert_eq!(go_username_field("key|username|ignored"), "username");
+        assert_eq!(go_username_field("key||ignored"), "");
+        assert!(std::panic::catch_unwind(|| go_username_field("key")).is_err());
+    }
 }
