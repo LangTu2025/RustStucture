@@ -234,7 +234,10 @@ fn tag_reader_read_tag_float64_truncation_consumes_available_bytes() {
 fn tag_reader_read_tag_int32_array_matches_all_encodings_and_empty_count() {
     let fixed_le = [2, 0, 0, 0, 1, 0, 0, 0, 0xfe, 0xff, 0xff, 0xff];
     let fixed_be = [0, 0, 0, 2, 0, 0, 0, 1, 0xff, 0xff, 0xff, 0xfe];
-    for (encoding, bytes) in [(Encoding::LittleEndian, &fixed_le[..]), (Encoding::BigEndian, &fixed_be[..])] {
+    for (encoding, bytes) in [
+        (Encoding::LittleEndian, &fixed_le[..]),
+        (Encoding::BigEndian, &fixed_be[..]),
+    ] {
         let mut reader = nbt::Reader::new(bytes, encoding);
         assert_eq!(reader.int_array().unwrap(), [1, -2]);
         assert_eq!(reader.pos, bytes.len());
@@ -268,9 +271,16 @@ fn tag_reader_read_tag_int32_array_negative_length_panics_like_go() {
 
 #[test]
 fn tag_reader_read_tag_int64_array_matches_all_encodings_and_empty_count() {
-    let fixed_le = [2, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
-    let fixed_be = [0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 1, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe];
-    for (encoding, bytes) in [(Encoding::LittleEndian, &fixed_le[..]), (Encoding::BigEndian, &fixed_be[..])] {
+    let fixed_le = [
+        2, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    ];
+    let fixed_be = [
+        0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 1, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe,
+    ];
+    for (encoding, bytes) in [
+        (Encoding::LittleEndian, &fixed_le[..]),
+        (Encoding::BigEndian, &fixed_be[..]),
+    ] {
         let mut reader = nbt::Reader::new(bytes, encoding);
         assert_eq!(reader.long_array().unwrap(), [1, -2]);
         assert_eq!(reader.pos, bytes.len());
@@ -303,7 +313,10 @@ fn tag_reader_read_tag_int64_array_negative_length_panics_like_go() {
 
 #[test]
 fn tag_reader_read_tag_list_decodes_values_end_items_and_nested_lists() {
-    let mut ints = nbt::Reader::new(&[3, 2, 0, 0, 0, 1, 0, 0, 0, 0xfe, 0xff, 0xff, 0xff], Encoding::LittleEndian);
+    let mut ints = nbt::Reader::new(
+        &[3, 2, 0, 0, 0, 1, 0, 0, 0, 0xfe, 0xff, 0xff, 0xff],
+        Encoding::LittleEndian,
+    );
     assert_eq!(ints.list().unwrap(), [Nbt::Int(1), Nbt::Int(-2)]);
     assert_eq!(ints.pos, 13);
 
@@ -363,10 +376,7 @@ fn tag_reader_read_tag_list_low_level_has_no_decoder_depth_limit() {
 #[test]
 fn tag_reader_read_tag_compound_handles_end_nested_and_duplicate_names() {
     let bytes = [
-        1, 1, 0, b'x', 1,
-        1, 1, 0, b'x', 2,
-        10, 1, 0, b'n', 1, 1, 0, b'y', 3, 0,
-        0,
+        1, 1, 0, b'x', 1, 1, 1, 0, b'x', 2, 10, 1, 0, b'n', 1, 1, 0, b'y', 3, 0, 0,
     ];
     let mut reader = nbt::Reader::new(&bytes, Encoding::LittleEndian);
     let Nbt::Compound(compound) = reader.compound().unwrap() else {
@@ -420,11 +430,7 @@ fn tag_reader_read_tag_compound_propagates_truncated_name_and_value() {
 
 #[test]
 fn tag_reader_read_tag_compound_stops_at_end_and_last_duplicate_wins() {
-    let bytes = [
-        1, 1, 0, b'x', 7,
-        1, 1, 0, b'x', 9,
-        0, 99,
-    ];
+    let bytes = [1, 1, 0, b'x', 7, 1, 1, 0, b'x', 9, 0, 99];
     let mut reader = nbt::Reader::new(&bytes, Encoding::LittleEndian);
     assert_eq!(
         reader.compound().unwrap(),
@@ -447,7 +453,10 @@ fn tag_reader_read_tag_compound_preserves_non_utf8_name_bytes() {
     let encoded = nbt::encode("root", &raw, Encoding::LittleEndian).unwrap();
     let decoded = nbt::decode(&encoded, Encoding::LittleEndian).unwrap();
     assert_eq!(decoded.1, raw);
-    assert_eq!(nbt::encode(&decoded.0, &decoded.1, Encoding::LittleEndian).unwrap(), encoded);
+    assert_eq!(
+        nbt::encode(&decoded.0, &decoded.1, Encoding::LittleEndian).unwrap(),
+        encoded
+    );
 }
 
 #[test]
@@ -486,7 +495,11 @@ fn tag_reader_skip_tag_int16_partial_and_eof_advance_offset() {
 
 #[test]
 fn tag_reader_skip_tag_int32_always_consumes_four_fixed_bytes() {
-    for encoding in [Encoding::LittleEndian, Encoding::BigEndian, Encoding::NetworkLittleEndian] {
+    for encoding in [
+        Encoding::LittleEndian,
+        Encoding::BigEndian,
+        Encoding::NetworkLittleEndian,
+    ] {
         let mut reader = nbt::Reader::new(&[1, 2, 3, 4, 0x43], encoding);
         reader.skip_int().unwrap();
         assert_eq!(reader.byte().unwrap(), 0x43, "{encoding:?}");
@@ -507,7 +520,11 @@ fn tag_reader_skip_tag_int32_partial_and_eof_advance_offset() {
 
 #[test]
 fn tag_reader_skip_tag_int64_always_consumes_eight_fixed_bytes() {
-    for encoding in [Encoding::LittleEndian, Encoding::BigEndian, Encoding::NetworkLittleEndian] {
+    for encoding in [
+        Encoding::LittleEndian,
+        Encoding::BigEndian,
+        Encoding::NetworkLittleEndian,
+    ] {
         let mut reader = nbt::Reader::new(&[1, 2, 3, 4, 5, 6, 7, 8, 0x43], encoding);
         reader.skip_long().unwrap();
         assert_eq!(reader.byte().unwrap(), 0x43, "{encoding:?}");
@@ -528,7 +545,11 @@ fn tag_reader_skip_tag_int64_partial_and_eof_advance_offset() {
 
 #[test]
 fn tag_reader_skip_tag_float32_always_consumes_four_fixed_bytes() {
-    for encoding in [Encoding::LittleEndian, Encoding::BigEndian, Encoding::NetworkLittleEndian] {
+    for encoding in [
+        Encoding::LittleEndian,
+        Encoding::BigEndian,
+        Encoding::NetworkLittleEndian,
+    ] {
         let mut reader = nbt::Reader::new(&[1, 2, 3, 4, 0x43], encoding);
         reader.skip_float().unwrap();
         assert_eq!(reader.byte().unwrap(), 0x43, "{encoding:?}");
@@ -549,7 +570,11 @@ fn tag_reader_skip_tag_float32_partial_and_eof_advance_offset() {
 
 #[test]
 fn tag_reader_skip_tag_float64_always_consumes_eight_fixed_bytes() {
-    for encoding in [Encoding::LittleEndian, Encoding::BigEndian, Encoding::NetworkLittleEndian] {
+    for encoding in [
+        Encoding::LittleEndian,
+        Encoding::BigEndian,
+        Encoding::NetworkLittleEndian,
+    ] {
         let mut reader = nbt::Reader::new(&[1, 2, 3, 4, 5, 6, 7, 8, 0x43], encoding);
         reader.skip_double().unwrap();
         assert_eq!(reader.byte().unwrap(), 0x43, "{encoding:?}");
@@ -570,7 +595,11 @@ fn tag_reader_skip_tag_float64_partial_and_eof_advance_offset() {
 
 #[test]
 fn tag_reader_skip_tag_string_uses_fixed_int16_length_for_all_encodings() {
-    for encoding in [Encoding::LittleEndian, Encoding::BigEndian, Encoding::NetworkLittleEndian] {
+    for encoding in [
+        Encoding::LittleEndian,
+        Encoding::BigEndian,
+        Encoding::NetworkLittleEndian,
+    ] {
         let bytes = match encoding {
             Encoding::BigEndian => vec![0, 2, b'H', b'i', 0x43],
             _ => vec![2, 0, b'H', b'i', 0x43],
@@ -629,8 +658,14 @@ fn tag_reader_skip_tag_byte_array_handles_negative_zero_and_truncated_lengths() 
 #[test]
 fn tag_reader_skip_tag_int32_array_matches_fixed_and_network_encodings() {
     for (encoding, bytes) in [
-        (Encoding::LittleEndian, vec![2, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 0x43]),
-        (Encoding::BigEndian, vec![0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 2, 0x43]),
+        (
+            Encoding::LittleEndian,
+            vec![2, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 0x43],
+        ),
+        (
+            Encoding::BigEndian,
+            vec![0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 2, 0x43],
+        ),
         (Encoding::NetworkLittleEndian, vec![4, 2, 4, 0x43]),
     ] {
         let mut reader = nbt::Reader::new(&bytes, encoding);
@@ -642,7 +677,8 @@ fn tag_reader_skip_tag_int32_array_matches_fixed_and_network_encodings() {
 #[test]
 fn tag_reader_skip_tag_int32_array_handles_negative_zero_and_truncation() {
     let mut negative = nbt::Reader::new(&[0xff, 0xff, 0xff, 0xff], Encoding::LittleEndian);
-    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| negative.skip_int_array()));
+    let panic =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| negative.skip_int_array()));
     assert!(panic.is_err());
 
     let mut zero = nbt::Reader::new(&[0, 0, 0, 0, 0x43], Encoding::LittleEndian);
@@ -657,8 +693,18 @@ fn tag_reader_skip_tag_int32_array_handles_negative_zero_and_truncation() {
 #[test]
 fn tag_reader_skip_tag_int64_array_matches_fixed_and_network_encodings() {
     for (encoding, bytes) in [
-        (Encoding::LittleEndian, vec![2, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0x43]),
-        (Encoding::BigEndian, vec![0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 2, 0x43]),
+        (
+            Encoding::LittleEndian,
+            vec![
+                2, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0x43,
+            ],
+        ),
+        (
+            Encoding::BigEndian,
+            vec![
+                0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 2, 0x43,
+            ],
+        ),
         (Encoding::NetworkLittleEndian, vec![4, 2, 4, 0x43]),
     ] {
         let mut reader = nbt::Reader::new(&bytes, encoding);
@@ -670,7 +716,10 @@ fn tag_reader_skip_tag_int64_array_matches_fixed_and_network_encodings() {
 #[test]
 fn tag_reader_skip_tag_int64_array_handles_negative_zero_and_truncation() {
     let mut negative = nbt::Reader::new(&[0xff, 0xff, 0xff, 0xff], Encoding::LittleEndian);
-    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| negative.skip_long_array())).is_err());
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| negative.skip_long_array()))
+            .is_err()
+    );
 
     let mut zero = nbt::Reader::new(&[0, 0, 0, 0, 0x43], Encoding::LittleEndian);
     zero.skip_long_array().unwrap();
@@ -692,7 +741,10 @@ fn tag_reader_skip_tag_list_handles_values_end_nested_and_network_count() {
     end.skip_list().unwrap();
     assert_eq!(end.byte().unwrap(), 0x43);
 
-    let mut nested = nbt::Reader::new(&[9, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0x42, 0x43], Encoding::LittleEndian);
+    let mut nested = nbt::Reader::new(
+        &[9, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0x42, 0x43],
+        Encoding::LittleEndian,
+    );
     nested.skip_list().unwrap();
     assert_eq!(nested.byte().unwrap(), 0x43);
 
@@ -767,7 +819,9 @@ fn tag_reader_skip_tag_value_dispatches_every_tag_without_consuming_sentinel() {
     for (tag, mut payload) in cases {
         payload.push(0x99);
         let mut reader = nbt::Reader::new(&payload, Encoding::LittleEndian);
-        reader.skip_tag_value(tag).unwrap_or_else(|error| panic!("tag {tag}: {error}"));
+        reader
+            .skip_tag_value(tag)
+            .unwrap_or_else(|error| panic!("tag {tag}: {error}"));
         assert_eq!(reader.byte().unwrap(), 0x99, "tag {tag}");
     }
 
@@ -907,7 +961,10 @@ fn tag_reader_read_named_tag_and_compound_end() {
     let input = [10, 0, 0, 1, 1, 0, b'x', 0x42, 0];
     let (name, value) = nbt::decode(&input, Encoding::LittleEndian).unwrap();
     assert_eq!(name, "");
-    assert_eq!(value, Nbt::Compound(BTreeMap::from([("x".into(), Nbt::Byte(0x42))])));
+    assert_eq!(
+        value,
+        Nbt::Compound(BTreeMap::from([("x".into(), Nbt::Byte(0x42))]))
+    );
 }
 
 #[test]
@@ -929,7 +986,10 @@ fn tag_writer_round_trip() {
         ("ByteArrayVal".into(), Nbt::ByteArray(vec![1, 2, 3])),
         ("IntArrayVal".into(), Nbt::IntArray(vec![4, 5])),
         ("LongArrayVal".into(), Nbt::LongArray(vec![6, 7])),
-        ("ListVal".into(), Nbt::List(vec![Nbt::Int(1), Nbt::Int(2), Nbt::Int(3)])),
+        (
+            "ListVal".into(),
+            Nbt::List(vec![Nbt::Int(1), Nbt::Int(2), Nbt::Int(3)]),
+        ),
         ("EmptyList".into(), Nbt::List(vec![])),
         (
             "CompoundVal".into(),
@@ -940,7 +1000,10 @@ fn tag_writer_round_trip() {
         ),
     ]));
     let bytes = nbt::encode("Root", &value, Encoding::NetworkLittleEndian).unwrap();
-    assert_eq!(nbt::decode(&bytes, Encoding::NetworkLittleEndian).unwrap(), ("Root".into(), value));
+    assert_eq!(
+        nbt::decode(&bytes, Encoding::NetworkLittleEndian).unwrap(),
+        ("Root".into(), value)
+    );
 }
 
 #[test]
@@ -1041,15 +1104,27 @@ fn tag_writer_write_tag_value_dispatches_go_types_and_errors() {
         (1, Nbt::Byte(-1), vec![0xff]),
         (2, Nbt::Short(-2), vec![0xfe, 0xff]),
         (3, Nbt::Int(1), vec![1, 0, 0, 0]),
-        (4, Nbt::Long(-1), vec![0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]),
+        (
+            4,
+            Nbt::Long(-1),
+            vec![0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff],
+        ),
         (5, Nbt::Float(1.5), 1.5f32.to_le_bytes().to_vec()),
         (6, Nbt::Double(2.5), 2.5f64.to_le_bytes().to_vec()),
         (7, Nbt::ByteArray(vec![3]), vec![1, 0, 0, 0, 3]),
         (8, Nbt::String("x".into()), vec![1, 0, b'x']),
-        (9, Nbt::List(vec![Nbt::Int(1)]), vec![3, 1, 0, 0, 0, 1, 0, 0, 0]),
+        (
+            9,
+            Nbt::List(vec![Nbt::Int(1)]),
+            vec![3, 1, 0, 0, 0, 1, 0, 0, 0],
+        ),
         (10, Nbt::Compound(BTreeMap::new()), vec![0]),
         (11, Nbt::IntArray(vec![2]), vec![1, 0, 0, 0, 2, 0, 0, 0]),
-        (12, Nbt::LongArray(vec![2]), vec![1, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0]),
+        (
+            12,
+            Nbt::LongArray(vec![2]),
+            vec![1, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0],
+        ),
     ];
     for (tag, value, expected) in cases {
         let mut writer = nbt::Writer::new(Encoding::LittleEndian);
@@ -1058,7 +1133,8 @@ fn tag_writer_write_tag_value_dispatches_go_types_and_errors() {
     }
 
     let mut end = nbt::Writer::new(Encoding::LittleEndian);
-    end.write_tag_value(0, &Nbt::String("ignored".into())).unwrap();
+    end.write_tag_value(0, &Nbt::String("ignored".into()))
+        .unwrap();
     assert!(end.data.is_empty());
 
     let mut mismatch = nbt::Writer::new(Encoding::LittleEndian);
@@ -1109,10 +1185,7 @@ fn tag_writer_write_tag_list_matches_go_types_partial_output_and_depth_limit() {
     let mut mixed_sink = nbt::OffsetWriter::new(nbt::IoWriteSink::new(Vec::new()));
     assert_eq!(
         nbt::Writer::new(Encoding::LittleEndian)
-            .write_tag_list_to(
-                &mut mixed_sink,
-                &[Nbt::Int(1), Nbt::String("bad".into())]
-            )
+            .write_tag_list_to(&mut mixed_sink, &[Nbt::Int(1), Nbt::String("bad".into())])
             .unwrap_err()
             .to_string(),
         "nbt: 值类型 string（列表[1]）无法转换为 NBT 标签"
@@ -1128,7 +1201,9 @@ fn tag_writer_write_tag_list_matches_go_types_partial_output_and_depth_limit() {
         accepted = Nbt::List(vec![accepted]);
     }
     let mut writer = nbt::Writer::new(Encoding::LittleEndian);
-    writer.write_tag_list(std::slice::from_ref(&accepted)).unwrap();
+    writer
+        .write_tag_list(std::slice::from_ref(&accepted))
+        .unwrap();
     let expected = writer.data.clone();
     let mut sink = nbt::OffsetWriter::new(nbt::IoWriteSink::new(Vec::new()));
     nbt::Writer::new(Encoding::LittleEndian)
@@ -1159,7 +1234,10 @@ fn tag_writer_write_tag_list_matches_go_types_partial_output_and_depth_limit() {
     nbt::Writer::new(Encoding::LittleEndian)
         .write_tag_list_to(&mut raw_sink, &[Nbt::RawString(vec![0xff])])
         .unwrap();
-    assert_eq!(raw_sink.into_inner().into_inner(), [8, 1, 0, 0, 0, 1, 0, 0xff]);
+    assert_eq!(
+        raw_sink.into_inner().into_inner(),
+        [8, 1, 0, 0, 0, 1, 0, 0xff]
+    );
 
     let mut too_deep = Nbt::Int(1);
     for _ in 0..512 {
@@ -1281,13 +1359,11 @@ fn nbt_encoder_matches_go_scalar_compound_tags_and_typed_empty_containers() {
         bytes,
         [
             10, // Root compound tag.
-            0, // empty root name
-            3, 7, b'R', b'e', b'n', b'a', b'm', b'e', b'd', 2,
-            9, 4, b'l', b'i', b's', b't', 3, 0,
-            7, 5, b'b', b'y', b't', b'e', b's', 6, 1, 2, 3,
-            11, 10, b'e', b'm', b'p', b't', b'y', b'_', b'i', b'n', b't', b's', 0,
-            9, 9, b'r', b'a', b'w', b'_', b'b', b'y', b't', b'e', b's', 1, 4, 4, 5,
-            0,
+            0,  // empty root name
+            3, 7, b'R', b'e', b'n', b'a', b'm', b'e', b'd', 2, 9, 4, b'l', b'i', b's', b't', 3, 0,
+            7, 5, b'b', b'y', b't', b'e', b's', 6, 1, 2, 3, 11, 10, b'e', b'm', b'p', b't', b'y',
+            b'_', b'i', b'n', b't', b's', 0, 9, 9, b'r', b'a', b'w', b'_', b'b', b'y', b't', b'e',
+            b's', 1, 4, 4, 5, 0,
         ]
     );
 
@@ -1319,10 +1395,8 @@ fn nbt_encoder_matches_go_scalar_compound_tags_and_typed_empty_containers() {
     assert_eq!(
         go_tagged,
         [
-            10, 0,
-            3, 7, b'r', b'e', b'n', b'a', b'm', b'e', b'd', 2,
-            2, 8, b'e', b'm', b'b', b'e', b'd', b'd', b'e', b'd', 3, 0,
-            0,
+            10, 0, 3, 7, b'r', b'e', b'n', b'a', b'm', b'e', b'd', 2, 2, 8, b'e', b'm', b'b', b'e',
+            b'd', b'd', b'e', b'd', 3, 0, 0,
         ]
     );
 
@@ -1337,22 +1411,10 @@ fn nbt_encoder_matches_go_scalar_compound_tags_and_typed_empty_containers() {
     assert_eq!(network_big, [10, 3, 0, 1, b'x', 0, 0, 0, 1, 0]);
 
     for (encoding, expected) in [
-        (
-            Encoding::LittleEndian,
-            vec![5, 0, 0, 0, 0, 0xc0, 0x3f],
-        ),
-        (
-            Encoding::BigEndian,
-            vec![5, 0, 0, 0x3f, 0xc0, 0, 0],
-        ),
-        (
-            Encoding::NetworkLittleEndian,
-            vec![5, 0, 0, 0, 0xc0, 0x3f],
-        ),
-        (
-            Encoding::NetworkBigEndian,
-            vec![5, 0, 0, 0x3f, 0xc0, 0, 0],
-        ),
+        (Encoding::LittleEndian, vec![5, 0, 0, 0, 0, 0xc0, 0x3f]),
+        (Encoding::BigEndian, vec![5, 0, 0, 0x3f, 0xc0, 0, 0]),
+        (Encoding::NetworkLittleEndian, vec![5, 0, 0, 0, 0xc0, 0x3f]),
+        (Encoding::NetworkBigEndian, vec![5, 0, 0, 0x3f, 0xc0, 0, 0]),
     ] {
         let mut output = Vec::new();
         nbt::Encoder::with_encoding(&mut output, encoding)
@@ -1382,10 +1444,7 @@ fn nbt_encoder_matches_go_scalar_compound_tags_and_typed_empty_containers() {
     let mut default_writer = nbt::Encoder::new(Vec::new());
     default_writer.encode(&true).unwrap();
     default_writer.encode(&"x").unwrap();
-    assert_eq!(
-        default_writer.into_inner(),
-        [1, 0, 1, 8, 0, 1, b'x']
-    );
+    assert_eq!(default_writer.into_inner(), [1, 0, 1, 8, 0, 1, b'x']);
 
     let mut inferred_empty_list = Vec::new();
     nbt::Encoder::new(&mut inferred_empty_list)
@@ -1420,16 +1479,22 @@ fn nbt_encoder_matches_go_scalar_compound_tags_and_typed_empty_containers() {
     assert_eq!(empty_arrays, [7, 0, 0, 11, 0, 0, 12, 0, 0, 9, 0, 1, 0]);
 
     let mut invalid_key = Vec::new();
-    assert_eq!(nbt::Encoder::new(&mut invalid_key)
-        .encode(&BTreeMap::from([(1i32, 2i32)]))
-        .unwrap_err()
-        .to_string(), "nbt: 值类型 map[int32]int32（）无法转换为 NBT 标签");
+    assert_eq!(
+        nbt::Encoder::new(&mut invalid_key)
+            .encode(&BTreeMap::from([(1i32, 2i32)]))
+            .unwrap_err()
+            .to_string(),
+        "nbt: 值类型 map[int32]int32（）无法转换为 NBT 标签"
+    );
     assert_eq!(invalid_key, [10, 0]);
     let mut unsupported = Vec::new();
-    assert_eq!(nbt::Encoder::new(&mut unsupported)
-        .encode(&1i8)
-        .unwrap_err()
-        .to_string(), "nbt: 值类型 int8（）无法转换为 NBT 标签");
+    assert_eq!(
+        nbt::Encoder::new(&mut unsupported)
+            .encode(&1i8)
+            .unwrap_err()
+            .to_string(),
+        "nbt: 值类型 int8（）无法转换为 NBT 标签"
+    );
 
     #[derive(Serialize)]
     struct Partial {
@@ -1437,14 +1502,14 @@ fn nbt_encoder_matches_go_scalar_compound_tags_and_typed_empty_containers() {
         bad: i8,
     }
     let mut partial_bytes = Vec::new();
-    assert_eq!(nbt::Encoder::new(&mut partial_bytes)
-        .encode(&Partial { good: 1, bad: 2 })
-        .unwrap_err()
-        .to_string(), "nbt: 值类型 int8（bad）无法转换为 NBT 标签");
     assert_eq!(
-        partial_bytes,
-        [10, 0, 3, 4, b'g', b'o', b'o', b'd', 2]
+        nbt::Encoder::new(&mut partial_bytes)
+            .encode(&Partial { good: 1, bad: 2 })
+            .unwrap_err()
+            .to_string(),
+        "nbt: 值类型 int8（bad）无法转换为 NBT 标签"
     );
+    assert_eq!(partial_bytes, [10, 0, 3, 4, b'g', b'o', b'o', b'd', 2]);
 
     #[derive(Serialize)]
     struct Inner {
@@ -1456,11 +1521,13 @@ fn nbt_encoder_matches_go_scalar_compound_tags_and_typed_empty_containers() {
         nested: Inner,
     }
     let mut nested_bytes = Vec::new();
-    assert!(nbt::Encoder::new(&mut nested_bytes)
-        .encode(&Nested {
-            nested: Inner { good: 1, bad: 2 },
-        })
-        .is_err());
+    assert!(
+        nbt::Encoder::new(&mut nested_bytes)
+            .encode(&Nested {
+                nested: Inner { good: 1, bad: 2 },
+            })
+            .is_err()
+    );
     assert_eq!(
         nested_bytes,
         [
@@ -1473,11 +1540,13 @@ fn nbt_encoder_matches_go_scalar_compound_tags_and_typed_empty_containers() {
         items: Vec<Inner>,
     }
     let mut list_bytes = Vec::new();
-    assert!(nbt::Encoder::new(&mut list_bytes)
-        .encode(&ListRoot {
-            items: vec![Inner { good: 1, bad: 2 }],
-        })
-        .is_err());
+    assert!(
+        nbt::Encoder::new(&mut list_bytes)
+            .encode(&ListRoot {
+                items: vec![Inner { good: 1, bad: 2 }],
+            })
+            .is_err()
+    );
     assert_eq!(
         list_bytes,
         [
@@ -1493,20 +1562,24 @@ fn nbt_encoder_matches_go_scalar_compound_tags_and_typed_empty_containers() {
     let mut empty_struct = Vec::new();
     nbt::Encoder::new(&mut empty_struct).encode(&Empty).unwrap();
     assert_eq!(empty_struct, [10, 0, 0]);
-    assert!(nbt::Encoder::new(Vec::new())
-        .encode(&())
-        .unwrap_err()
-        .to_string()
-        .contains("unit"));
+    assert!(
+        nbt::Encoder::new(Vec::new())
+            .encode(&())
+            .unwrap_err()
+            .to_string()
+            .contains("unit")
+    );
 
     #[derive(Serialize)]
     struct UnsupportedArray {
         values: [i16; 2],
     }
     let mut unsupported_array = Vec::new();
-    assert!(nbt::Encoder::new(&mut unsupported_array)
-        .encode(&UnsupportedArray { values: [1, 2] })
-        .is_err());
+    assert!(
+        nbt::Encoder::new(&mut unsupported_array)
+            .encode(&UnsupportedArray { values: [1, 2] })
+            .is_err()
+    );
     assert_eq!(unsupported_array, [10, 0]);
     let mut unsupported_array_root = Vec::new();
     assert_eq!(
@@ -1562,20 +1635,48 @@ fn nbt_decoder_matches_go_streaming_mutation_and_field_rules() {
     #[derive(Default, nbt::NbtDecode)]
     struct Embedded {
         #[nbt(rename = "nested")]
-        value: i32,
+        pub value: i32,
     }
     #[derive(Default, nbt::NbtDecode)]
     struct Record {
         #[nbt(rename = "renamed,omitempty")]
-        value: i32,
+        pub value: i32,
         #[nbt(skip)]
         ignored: i32,
         #[nbt(flatten)]
-        embedded: Embedded,
+        pub embedded: Embedded,
     }
     #[derive(Default, nbt::NbtDecode)]
     struct GenericRecord<T: Default> {
-        value: T,
+        pub value: T,
+    }
+    #[derive(Default, nbt::NbtDecode)]
+    struct Earlier {
+        #[nbt(rename = "collision")]
+        pub value: i32,
+    }
+    #[derive(Default, nbt::NbtDecode)]
+    struct Later {
+        #[nbt(rename = "collision")]
+        pub value: i32,
+    }
+    #[derive(Default, nbt::NbtDecode)]
+    struct FlattenCollision {
+        #[nbt(flatten)]
+        pub earlier: Earlier,
+        #[nbt(flatten)]
+        pub later: Later,
+    }
+    #[derive(Default, nbt::NbtDecode)]
+    struct ExportedOnly {
+        pub visible: i32,
+        #[allow(dead_code)]
+        hidden: i32,
+    }
+    #[derive(Default, nbt::NbtDecode)]
+    #[nbt(type_name = "main.NamedRecord")]
+    struct NamedRecord {
+        pub value: i32,
     }
 
     let mut input = vec![10, 0];
@@ -1598,10 +1699,38 @@ fn nbt_decoder_matches_go_streaming_mutation_and_field_rules() {
     assert_eq!(record.embedded.value, 9);
     assert_eq!(decoder.get_offset(), input.len() as u64);
 
-    let mut generic = nbt::Decoder::new([10, 0, 3, 5, b'v', b'a', b'l', b'u', b'e', 4, 0].as_slice());
+    let mut generic =
+        nbt::Decoder::new([10, 0, 3, 5, b'V', b'a', b'l', b'u', b'e', 4, 0].as_slice());
     let mut generic_record = GenericRecord { value: 0i32 };
     generic.decode(&mut generic_record).unwrap();
     assert_eq!(generic_record.value, 2);
+
+    let collision_input = [
+        10, 0, 3, 9, b'c', b'o', b'l', b'l', b'i', b's', b'i', b'o', b'n', 6, 0,
+    ];
+    let mut decoder = nbt::Decoder::new(collision_input.as_slice());
+    let mut collision = FlattenCollision::default();
+    decoder.decode(&mut collision).unwrap();
+    assert_eq!(collision.earlier.value, 0);
+    assert_eq!(collision.later.value, 3);
+
+    let private_field = [10, 0, 3, 6, b'h', b'i', b'd', b'd', b'e', b'n', 4, 0];
+    let mut decoder = nbt::Decoder::new(private_field.as_slice());
+    let error = decoder
+        .decode(&mut ExportedOnly::default())
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("意外命名标签 'hidden'"));
+
+    let mut decoder =
+        nbt::Decoder::with_encoding([3, 0, 0, 0, 0, 0, 0, 1].as_slice(), Encoding::BigEndian);
+    assert_eq!(
+        decoder
+            .decode(&mut NamedRecord::default())
+            .unwrap_err()
+            .to_string(),
+        "nbt: 在偏移 7 的标签 '' 类型无效: 无法将 TAG_Int 反序列化为 main.NamedRecord"
+    );
 
     let mut partial = vec![10, 0, 3, 7];
     partial.extend_from_slice(b"renamed");
@@ -1609,7 +1738,8 @@ fn nbt_decoder_matches_go_streaming_mutation_and_field_rules() {
     partial.extend([3, 7]);
     partial.extend_from_slice(b"unknown");
     partial.extend([18, 0]);
-    let mut decoder = nbt::Decoder::with_encoding(partial.as_slice(), Encoding::NetworkLittleEndian);
+    let mut decoder =
+        nbt::Decoder::with_encoding(partial.as_slice(), Encoding::NetworkLittleEndian);
     let mut record = Record::default();
     let error = decoder.decode(&mut record).unwrap_err().to_string();
     assert_eq!(record.value, 7);
@@ -1654,6 +1784,14 @@ fn nbt_decoder_matches_go_streaming_mutation_and_field_rules() {
     );
     assert_eq!((wrong_type, decoder.get_offset()), (9, 7));
 
+    let mut decoder = nbt::Decoder::with_encoding([1, 0, 0, 255].as_slice(), Encoding::BigEndian);
+    let mut unsupported = 5i8;
+    assert_eq!(
+        decoder.decode(&mut unsupported).unwrap_err().to_string(),
+        "nbt: 在偏移 4 的标签 '' 类型无效: 无法将 TAG_Byte 反序列化为 int8"
+    );
+    assert_eq!((unsupported, decoder.get_offset()), (5, 4));
+
     let mut decoder = nbt::Decoder::new([9, 0, 3, 0].as_slice());
     let mut not_a_list = 9i32;
     assert_eq!(
@@ -1667,6 +1805,42 @@ fn nbt_decoder_matches_go_streaming_mutation_and_field_rules() {
     let mut list = vec![true];
     decoder.decode(&mut list).unwrap();
     assert!(list.is_empty());
+
+    let mut end_list = [9, 0, 0, 4].as_slice();
+    let mut decoder = nbt::Decoder::new(&mut end_list);
+    let mut end_values = vec![nbt::Nbt::Int(7)];
+    assert!(
+        decoder
+            .decode(&mut end_values)
+            .unwrap_err()
+            .to_string()
+            .contains("意外标签 TAG_End")
+    );
+    assert_eq!(end_values, [nbt::Nbt::Int(7)]);
+    assert_eq!(decoder.get_offset(), 4);
+
+    let mut truncated_array = [7, 0].as_slice();
+    let mut decoder = nbt::Decoder::new(&mut truncated_array);
+    let mut array = [0u8; 1];
+    assert_eq!(
+        decoder.decode(&mut array).unwrap_err().to_string(),
+        "nbt: 操作 'Int32' 期间缓冲区意外结束"
+    );
+
+    let mut decoder = nbt::Decoder::with_encoding(
+        [11, 0, 0, 0, 0, 0, 1, 0, 0, 0, 7].as_slice(),
+        Encoding::BigEndian,
+    );
+    let mut int_array = [0i32; 1];
+    decoder.decode(&mut int_array).unwrap();
+    assert_eq!(int_array, [7]);
+    let mut decoder = nbt::Decoder::with_encoding(
+        [12, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 7].as_slice(),
+        Encoding::BigEndian,
+    );
+    let mut long_array = [0i64; 1];
+    decoder.decode(&mut long_array).unwrap();
+    assert_eq!(long_array, [7]);
 
     let raw = [8, 0, 0, 1, 0, 0xff];
     let mut decoder = nbt::Decoder::with_encoding(raw.as_slice(), Encoding::LittleEndian);
@@ -1842,9 +2016,7 @@ fn tag_writer_write_tag_int32_to_matches_encodings_and_go_write_errors() {
         results: vec![(1, None)],
         bytes: Vec::new(),
     });
-    fixed
-        .write_tag_int32_to(&mut fixed_short, 0x1234)
-        .unwrap();
+    fixed.write_tag_int32_to(&mut fixed_short, 0x1234).unwrap();
     assert_eq!(fixed_short.get_offset(), 1);
     assert_eq!(fixed_short.into_inner().bytes, [0]);
 
@@ -1863,7 +2035,10 @@ fn tag_writer_write_tag_int32_to_matches_encodings_and_go_write_errors() {
 
     let network = nbt::Writer::new(Encoding::NetworkLittleEndian);
     let mut network_error = nbt::OffsetWriter::new(ScriptedSink {
-        results: vec![(1, None), (0, Some(std::io::Error::other("hidden by Go error")))],
+        results: vec![
+            (1, None),
+            (0, Some(std::io::Error::other("hidden by Go error"))),
+        ],
         bytes: Vec::new(),
     });
     assert_eq!(
@@ -1899,11 +2074,7 @@ fn tag_writer_write_tag_int64_to_matches_encodings_and_go_write_errors() {
             0x0102_0304_0506_0708,
             vec![8, 7, 6, 5, 4, 3, 2, 1],
         ),
-        (
-            Encoding::NetworkLittleEndian,
-            150,
-            vec![0xac, 0x02],
-        ),
+        (Encoding::NetworkLittleEndian, 150, vec![0xac, 0x02]),
         (
             Encoding::BigEndian,
             0x0102_0304_0506_0708,
@@ -1987,15 +2158,9 @@ fn tag_writer_write_tag_float32_to_preserves_bits_encodings_and_go_errors() {
     let value = f32::from_bits(0x7fc0_1234);
     for (encoding, expected) in [
         (Encoding::LittleEndian, vec![0x34, 0x12, 0xc0, 0x7f]),
-        (
-            Encoding::NetworkLittleEndian,
-            vec![0x34, 0x12, 0xc0, 0x7f],
-        ),
+        (Encoding::NetworkLittleEndian, vec![0x34, 0x12, 0xc0, 0x7f]),
         (Encoding::BigEndian, vec![0x7f, 0xc0, 0x12, 0x34]),
-        (
-            Encoding::NetworkBigEndian,
-            vec![0x7f, 0xc0, 0x12, 0x34],
-        ),
+        (Encoding::NetworkBigEndian, vec![0x7f, 0xc0, 0x12, 0x34]),
     ] {
         let mut writer = nbt::Writer::new(encoding);
         writer.write_tag_float32(value).unwrap();
@@ -2136,7 +2301,10 @@ fn tag_writer_write_tag_string_matches_go_lengths_bytes_and_sink_errors() {
 
     let mut too_long = nbt::Writer::new(Encoding::LittleEndian);
     assert_eq!(
-        too_long.write_tag_string(&"x".repeat(32768)).unwrap_err().to_string(),
+        too_long
+            .write_tag_string(&"x".repeat(32768))
+            .unwrap_err()
+            .to_string(),
         "nbt: 偏移 0 的字符串无效: 字符串长度超过最大限制（长度=32768）"
     );
     assert!(too_long.data.is_empty());
@@ -2304,7 +2472,10 @@ fn tag_writer_write_tag_int32_array_matches_go_encodings_and_write_calls() {
 
     let fixed = nbt::Writer::new(Encoding::BigEndian);
     let mut fixed_error = nbt::OffsetWriter::new(ScriptedSink {
-        results: vec![(4, None), (2, Some(std::io::Error::other("ignored by Go error")))],
+        results: vec![
+            (4, None),
+            (2, Some(std::io::Error::other("ignored by Go error"))),
+        ],
         bytes: Vec::new(),
     });
     assert_eq!(
@@ -2353,18 +2524,28 @@ fn tag_writer_write_tag_int64_array_matches_go_encodings_and_write_calls() {
         (
             Encoding::LittleEndian,
             vec![1, -2],
-            vec![2, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff],
+            vec![
+                2, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+            ],
         ),
-        (Encoding::NetworkLittleEndian, vec![150], vec![2, 0xac, 0x02]),
+        (
+            Encoding::NetworkLittleEndian,
+            vec![150],
+            vec![2, 0xac, 0x02],
+        ),
         (
             Encoding::BigEndian,
             vec![1, -2],
-            vec![0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 1, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe],
+            vec![
+                0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 1, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe,
+            ],
         ),
         (
             Encoding::NetworkBigEndian,
             vec![1, -2],
-            vec![0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 1, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe],
+            vec![
+                0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 1, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe,
+            ],
         ),
     ] {
         let mut writer = nbt::Writer::new(encoding);
@@ -2372,16 +2553,17 @@ fn tag_writer_write_tag_int64_array_matches_go_encodings_and_write_calls() {
         assert_eq!(writer.data, expected);
 
         let mut sink = nbt::OffsetWriter::new(nbt::IoWriteSink::new(Vec::new()));
-        writer
-            .write_tag_int64_array_to(&mut sink, &values)
-            .unwrap();
+        writer.write_tag_int64_array_to(&mut sink, &values).unwrap();
         assert_eq!(sink.get_offset(), expected.len() as u64);
         assert_eq!(sink.into_inner().into_inner(), expected);
     }
 
     let fixed = nbt::Writer::new(Encoding::BigEndian);
     let mut fixed_error = nbt::OffsetWriter::new(ScriptedSink {
-        results: vec![(4, None), (3, Some(std::io::Error::other("ignored by Go error")))],
+        results: vec![
+            (4, None),
+            (3, Some(std::io::Error::other("ignored by Go error"))),
+        ],
         bytes: Vec::new(),
     });
     assert_eq!(

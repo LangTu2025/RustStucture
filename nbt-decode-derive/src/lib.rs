@@ -19,6 +19,7 @@ struct Field {
     wire_name: String,
     skip: bool,
     flatten: bool,
+    exported: bool,
 }
 
 fn expand(input: TokenStream) -> Result<String, String> {
@@ -31,6 +32,7 @@ fn expand(input: TokenStream) -> Result<String, String> {
         Some(TokenTree::Ident(ident)) => ident.to_string(),
         _ => return Err("NbtDecode could not read struct name".to_owned()),
     };
+    let go_type = parse_container_type_name(&tokens[..struct_index]);
     let body_index = tokens[struct_index + 2..]
         .iter()
         .position(|token| matches!(token, TokenTree::Group(group) if group.delimiter() == Delimiter::Brace))
@@ -44,7 +46,7 @@ fn expand(input: TokenStream) -> Result<String, String> {
     let fields = parse_fields(body)?;
     let field_bounds = fields
         .iter()
-        .filter(|field| !field.skip)
+        .filter(|field| !field.skip && field.exported)
         .map(|field| format!("{}: ::rust_water_structure::nbt::NbtDecode", field.ty))
         .collect::<Vec<_>>();
     let mut bounds = field_bounds;
@@ -56,61 +58,91 @@ fn expand(input: TokenStream) -> Result<String, String> {
     } else {
         format!("where {}", bounds.join(", "))
     };
-    let decode_arms = fields
+    let mut decode_dispatch = String::new();
+    let mut field_dispatch = String::new();
+    for field in fields
         .iter()
-        .filter(|field| !field.skip && !field.flatten)
-        .map(|field| {
-            format!(
-                "{wire:?} => decoder.decode_value(tag, full_name, &mut self.{ident}),",
+        .rev()
+        .filter(|field| !field.skip && field.exported)
+    {
+        if field.flatten {
+            decode_dispatch.push_str(&format!(
+                "if self.{ident}.decode_compound_field(decoder, tag, raw_name, full_name)? {{ return Ok(()); }};",
+                ident = field.ident
+            ));
+            field_dispatch.push_str(&format!(
+                "if self.{ident}.decode_compound_field(decoder, tag, raw_name, full_name)? {{ return Ok(true); }};",
+                ident = field.ident
+            ));
+        } else {
+            decode_dispatch.push_str(&format!(
+                "if raw_name == {wire:?} {{ return decoder.decode_value(tag, full_name, &mut self.{ident}); }};",
                 wire = field.wire_name,
                 ident = field.ident
-            )
-        })
-        .collect::<String>();
-    let field_arms = fields
-        .iter()
-        .filter(|field| !field.skip && !field.flatten)
-        .map(|field| {
-            format!(
-                "{wire:?} => decoder.decode_value(tag, full_name, &mut self.{ident}).map(|()| true),",
+            ));
+            field_dispatch.push_str(&format!(
+                "if raw_name == {wire:?} {{ return decoder.decode_value(tag, full_name, &mut self.{ident}).map(|()| true); }};",
                 wire = field.wire_name,
                 ident = field.ident
-            )
-        })
-        .collect::<String>();
-    let flatten = fields
-        .iter()
-        .filter(|field| !field.skip && field.flatten)
-        .map(|field| {
-            format!(
-                "if self.{ident}.decode_compound_field(decoder, tag, raw_name, full_name)? {{ return Ok(()); }}",
-                ident = field.ident
-            )
-        })
-        .collect::<String>();
-    let flatten_field = fields
-        .iter()
-        .filter(|field| !field.skip && field.flatten)
-        .map(|field| {
-            format!(
-                "if self.{ident}.decode_compound_field(decoder, tag, raw_name, full_name)? {{ return Ok(true); }}",
-                ident = field.ident
-            )
-        })
-        .collect::<String>();
+            ));
+        }
+    }
     Ok(format!(
         "impl {impl_generics} ::rust_water_structure::nbt::NbtDecode for {name}{type_generics} {where_clause} {{
+            fn go_type() -> ::std::string::String {{ {go_type} }}
             fn decode_tag<R: ::std::io::Read>(&mut self, decoder: &mut ::rust_water_structure::nbt::Decoder<R>, tag: u8, name: &str) -> ::rust_water_structure::Result<()> {{
-                if tag != 10 {{ return Err(decoder.invalid_struct_type(tag, name, ::core::any::type_name::<Self>())); }}
+                if tag != 10 {{ return Err(decoder.invalid_struct_type(tag, name, &Self::go_type())); }}
                 decoder.decode_compound(name, |decoder, tag, raw_name, full_name| {{
-                    match raw_name {{ {decode_arms} _ => {{ {flatten} Err(decoder.unexpected_named_tag(full_name, tag)) }} }}
+                    {decode_dispatch} Err(decoder.unexpected_named_tag(full_name, tag))
                 }})
             }}
             fn decode_compound_field<R: ::std::io::Read>(&mut self, decoder: &mut ::rust_water_structure::nbt::Decoder<R>, tag: u8, raw_name: &str, full_name: &str) -> ::rust_water_structure::Result<bool> {{
-                match raw_name {{ {field_arms} _ => {{ {flatten_field} Ok(false) }} }}
+                {field_dispatch} Ok(false)
             }}
         }}",
     ))
+}
+
+fn parse_container_type_name(tokens: &[TokenTree]) -> String {
+    for pair in tokens.windows(2) {
+        if !matches!(&pair[0], TokenTree::Punct(punct) if punct.as_char() == '#') {
+            continue;
+        }
+        let TokenTree::Group(attribute) = &pair[1] else {
+            continue;
+        };
+        if attribute.delimiter() != Delimiter::Bracket {
+            continue;
+        }
+        let mut attribute_tokens = attribute.stream().into_iter();
+        if !matches!(attribute_tokens.next(), Some(TokenTree::Ident(ref ident)) if ident.to_string() == "nbt")
+        {
+            continue;
+        }
+        let Some(TokenTree::Group(settings)) = attribute_tokens.next() else {
+            continue;
+        };
+        if settings.delimiter() != Delimiter::Parenthesis {
+            continue;
+        }
+        let settings = settings.stream().into_iter().collect::<Vec<_>>();
+        for setting in settings.windows(3) {
+            if matches!(&setting[0], TokenTree::Ident(ident) if ident.to_string() == "type_name")
+                && matches!(&setting[1], TokenTree::Punct(punct) if punct.as_char() == '=')
+            {
+                if let TokenTree::Literal(literal) = &setting[2] {
+                    let name = literal.to_string();
+                    if let Some(name) = name
+                        .strip_prefix('"')
+                        .and_then(|name| name.strip_suffix('"'))
+                    {
+                        return format!("{:?}.to_owned()", name);
+                    }
+                }
+            }
+        }
+    }
+    "::core::any::type_name::<Self>().to_owned()".to_owned()
 }
 
 fn parse_fields(body: &Group) -> Result<Vec<Field>, String> {
@@ -199,20 +231,51 @@ fn parse_field(tokens: Vec<TokenTree>) -> Result<Field, String> {
             _ => None,
         })
         .ok_or_else(|| "NbtDecode could not read field name".to_owned())?;
+    let is_public = tokens[..colon]
+        .iter()
+        .any(|token| matches!(token, TokenTree::Ident(ident) if ident.to_string() == "pub"));
     let ty = tokens[colon + 1..]
         .iter()
         .cloned()
         .collect::<TokenStream>()
         .to_string();
-    let wire_name = rename.unwrap_or_else(|| ident.clone());
+    let wire_name = rename.unwrap_or_else(|| go_field_name(&ident));
+    let exported = is_public
+        && go_field_name(&ident)
+            .chars()
+            .next()
+            .is_some_and(char::is_uppercase);
     let skip = skip || wire_name == "-";
+    let wire_name = wire_name.trim_end_matches(",omitempty");
+    let wire_name = if wire_name.is_empty() {
+        ident.clone()
+    } else {
+        wire_name.to_owned()
+    };
     Ok(Field {
-        wire_name: wire_name.trim_end_matches(",omitempty").to_owned(),
+        wire_name,
         ident,
         ty,
         skip,
         flatten,
+        exported,
     })
+}
+
+fn go_field_name(rust_name: &str) -> String {
+    let mut name = String::new();
+    let mut uppercase = true;
+    for character in rust_name.strip_prefix("r#").unwrap_or(rust_name).chars() {
+        if character == '_' {
+            uppercase = true;
+        } else if uppercase {
+            name.extend(character.to_uppercase());
+            uppercase = false;
+        } else {
+            name.push(character);
+        }
+    }
+    name
 }
 
 fn parse_generics(tokens: &[TokenTree]) -> Result<(String, String, String), String> {

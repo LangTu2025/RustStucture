@@ -235,7 +235,7 @@ impl<R: Read> Decoder<R> {
                 self.depth -= 1;
                 return Ok(());
             }
-            return Err(self.invalid_type(1, parent, type_name::<T>()));
+            return Err(self.invalid_type(1, parent, &T::go_type()));
         }
         if element_tag == 1 && T::BYTE_SLICE {
             let length = self.read_count("ByteSlice")?;
@@ -249,7 +249,7 @@ impl<R: Read> Decoder<R> {
                 self.depth -= 1;
                 return Ok(());
             }
-            return Err(self.invalid_type(1, parent, type_name::<T>()));
+            return Err(self.invalid_type(1, parent, &T::go_type()));
         }
         if element_tag == 3 && T::TAG != 3 && T::TAG != 255 {
             let length = self.read_count("Int32Slice")?;
@@ -257,7 +257,7 @@ impl<R: Read> Decoder<R> {
                 self.read_i32()
                     .map_err(|_| self.buffer_error("Int32Slice"))?;
             }
-            return Err(self.invalid_type(3, parent, type_name::<T>()));
+            return Err(self.invalid_type(3, parent, &T::go_type()));
         }
         if element_tag == 4 && T::TAG != 4 && T::TAG != 255 {
             let length = self.read_count("Int64Slice")?;
@@ -265,19 +265,13 @@ impl<R: Read> Decoder<R> {
                 self.read_i64()
                     .map_err(|_| self.buffer_error("Int64Slice"))?;
             }
-            return Err(self.invalid_type(4, parent, type_name::<T>()));
+            return Err(self.invalid_type(4, parent, &T::go_type()));
         }
         let length = self.read_count("Int32")?;
         let mut values = Vec::with_capacity(length.min(4096));
         for index in 0..length {
             if element_tag == 0 {
-                if T::TAG == 255 {
-                    let mut value = T::default();
-                    value.decode_tag(self, 0, "")?;
-                    values.push(value);
-                    continue;
-                }
-                return Err(self.invalid_type(0, parent, type_name::<T>()));
+                return Err(self.unexpected_tag(0));
             }
             let mut value = T::default();
             let name = format!("{parent}[{index}]");
@@ -291,8 +285,7 @@ impl<R: Read> Decoder<R> {
 
     fn read_tag_header(&mut self) -> Result<(u8, String)> {
         let (tag, bytes) = self.read_tag_header_bytes()?;
-        let name =
-            String::from_utf8(bytes).map_err(|_| Error::invalid("NBT 标签名称 UTF-8 无效"))?;
+        let name = String::from_utf8_lossy(&bytes).into_owned();
         Ok((tag, name))
     }
 
@@ -448,8 +441,7 @@ impl<R: Read> Decoder<R> {
                 start + 5
             )));
         } else {
-            self.read_i16()
-                .map_err(|_| self.buffer_error("String"))? as u16 as usize
+            self.read_i16().map_err(|_| self.buffer_error("String"))? as u16 as usize
         };
         self.read_bytes(length, "String")
     }
@@ -504,6 +496,14 @@ fn tag_name(tag: u8) -> &'static str {
 fn go_type_name(name: &str) -> String {
     match name {
         "u8" => "uint8".into(),
+        "i8" => "int8".into(),
+        "u16" => "uint16".into(),
+        "u32" => "uint32".into(),
+        "u64" => "uint64".into(),
+        "u128" => "uint128".into(),
+        "i128" => "int128".into(),
+        "usize" => "int".into(),
+        "isize" => "int".into(),
         "i16" => "int16".into(),
         "i32" => "int32".into(),
         "i64" => "int64".into(),
@@ -511,6 +511,13 @@ fn go_type_name(name: &str) -> String {
         "f64" => "float64".into(),
         "bool" => "bool".into(),
         "alloc::string::String" | "std::string::String" => "string".into(),
+        other if other.starts_with("alloc::vec::Vec<") || other.starts_with("std::vec::Vec<") => {
+            let inner = other
+                .split_once('<')
+                .map(|(_, inner)| inner.trim_end_matches('>'))
+                .unwrap_or("interface {}");
+            format!("[]{}", go_type_name(inner))
+        }
         other => other.to_owned(),
     }
 }
@@ -546,9 +553,33 @@ scalar_decode!(i64, 4, read_i64, "int64");
 scalar_decode!(f32, 5, read_f32, "float32");
 scalar_decode!(f64, 6, read_f64, "float64");
 
+macro_rules! unsupported_scalar_decode {
+    ($($type:ty),+ $(,)?) => {
+        $(
+            impl NbtDecode for $type {
+                const TAG: u8 = 254;
+
+                fn decode_tag<R: Read>(
+                    &mut self,
+                    decoder: &mut Decoder<R>,
+                    tag: u8,
+                    name: &str,
+                ) -> Result<()> {
+                    Err(decoder.invalid_type_after_payload(tag, name, &Self::go_type()))
+                }
+            }
+        )+
+    };
+}
+
+unsupported_scalar_decode!(i8, u16, u32, u64, u128, i128, usize, isize);
+
 impl NbtDecode for u8 {
     const TAG: u8 = 1;
     const BYTE_SLICE: bool = true;
+    fn go_type() -> String {
+        "uint8".into()
+    }
     fn from_list_byte(value: u8) -> Option<Self> {
         Some(value)
     }
@@ -557,47 +588,47 @@ impl NbtDecode for u8 {
             *self = d.read_byte("Byte")?;
             Ok(())
         } else {
-            if tag != 0 {
-                return Err(d.invalid_type_after_payload(tag, name, "uint8"));
-            }
-            Err(d.invalid_type(tag, name, "uint8"))
+            Err(d.invalid_type_after_payload(tag, name, "uint8"))
         }
     }
 }
 
 impl NbtDecode for bool {
     const TAG: u8 = 1;
+    fn go_type() -> String {
+        "bool".into()
+    }
     fn decode_tag<R: Read>(&mut self, d: &mut Decoder<R>, tag: u8, name: &str) -> Result<()> {
         if tag == 1 {
             *self = d.read_byte("Byte")? == 1;
             Ok(())
         } else {
-            if tag != 0 {
-                return Err(d.invalid_type_after_payload(tag, name, "bool"));
-            }
-            Err(d.invalid_type(tag, name, "bool"))
+            Err(d.invalid_type_after_payload(tag, name, "bool"))
         }
     }
 }
 
 impl NbtDecode for String {
     const TAG: u8 = 8;
+    fn go_type() -> String {
+        "string".into()
+    }
     fn decode_tag<R: Read>(&mut self, d: &mut Decoder<R>, tag: u8, name: &str) -> Result<()> {
         if tag == 8 {
             let bytes = d.read_string_bytes()?;
             *self = String::from_utf8_lossy(&bytes).into_owned();
             Ok(())
         } else {
-            if tag != 0 {
-                return Err(d.invalid_type_after_payload(tag, name, "string"));
-            }
-            Err(d.invalid_type(tag, name, "string"))
+            Err(d.invalid_type_after_payload(tag, name, "string"))
         }
     }
 }
 
 impl NbtDecode for Nbt {
     const BYTE_SLICE: bool = true;
+    fn go_type() -> String {
+        "interface {}".into()
+    }
     fn from_list_byte(value: u8) -> Option<Self> {
         Some(Nbt::Byte(value as i8))
     }
@@ -611,7 +642,7 @@ impl NbtDecode for Nbt {
             5 => *self = Nbt::Float(d.read_f32()?),
             6 => *self = Nbt::Double(d.read_f64()?),
             7 => {
-                let length = d.read_count("ByteArray")?;
+                let length = d.read_count("Int32")?;
                 let bytes = d.read_bytes(length, "ByteArray")?;
                 *self = Nbt::ByteArray(bytes.into_iter().map(|byte| byte as i8).collect());
             }
@@ -664,6 +695,9 @@ impl NbtDecode for Nbt {
 
 impl NbtDecode for super::RawString {
     const TAG: u8 = 8;
+    fn go_type() -> String {
+        "string".into()
+    }
     fn decode_tag<R: Read>(&mut self, d: &mut Decoder<R>, tag: u8, name: &str) -> Result<()> {
         if tag == 8 {
             self.0 = d.read_string_bytes()?;
@@ -677,12 +711,15 @@ impl NbtDecode for super::RawString {
 impl<T: NbtDecode + Default> NbtDecode for Vec<T> {
     const TAG: u8 = 9;
     const BYTE_SLICE: bool = T::BYTE_SLICE;
+    fn go_type() -> String {
+        format!("[]{}", T::go_type())
+    }
     fn decode_tag<R: Read>(&mut self, d: &mut Decoder<R>, tag: u8, name: &str) -> Result<()> {
         if tag == 9 {
             d.decode_list(name, self)
         } else {
             if tag == 7 {
-                let length = d.read_count("ByteArray")?;
+                let length = d.read_count("Int32")?;
                 let _ = d.read_bytes(length, "ByteArray")?;
             } else if tag == 11 || tag == 12 {
                 let count = d.read_count(if tag == 11 {
@@ -705,7 +742,7 @@ impl<T: NbtDecode + Default> NbtDecode for Vec<T> {
             if tag == 0 {
                 Err(d.unexpected_tag(tag))
             } else {
-                Err(d.invalid_type(tag, name, "slice"))
+                Err(d.invalid_type(tag, name, &Self::go_type()))
             }
         }
     }
@@ -713,9 +750,12 @@ impl<T: NbtDecode + Default> NbtDecode for Vec<T> {
 
 impl<T: NbtDecode + Default> NbtDecode for BTreeMap<String, T> {
     const TAG: u8 = 10;
+    fn go_type() -> String {
+        format!("map[string]{}", T::go_type())
+    }
     fn decode_tag<R: Read>(&mut self, d: &mut Decoder<R>, tag: u8, name: &str) -> Result<()> {
         if tag != 10 {
-            return Err(d.invalid_type_after_payload(tag, name, "map[string]interface {}"));
+            return Err(d.invalid_type_after_payload(tag, name, &Self::go_type()));
         }
         d.decode_compound_map(name, self)
     }
@@ -723,9 +763,12 @@ impl<T: NbtDecode + Default> NbtDecode for BTreeMap<String, T> {
 
 impl<T: NbtDecode + Default> NbtDecode for BTreeMap<Vec<u8>, T> {
     const TAG: u8 = 10;
+    fn go_type() -> String {
+        format!("map[string]{}", T::go_type())
+    }
     fn decode_tag<R: Read>(&mut self, d: &mut Decoder<R>, tag: u8, name: &str) -> Result<()> {
         if tag != 10 {
-            return Err(d.invalid_type_after_payload(tag, name, "map[string]interface {}"));
+            return Err(d.invalid_type_after_payload(tag, name, &Self::go_type()));
         }
         d.depth += 1;
         let mut decoded = BTreeMap::new();
@@ -756,7 +799,7 @@ impl<const N: usize> NbtDecode for [u8; N] {
         if tag != 7 {
             return Err(d.invalid_type_after_payload(tag, name, &Self::go_type()));
         }
-        let length = d.read_count("ByteArray")?;
+        let length = d.read_count("Int32")?;
         let bytes = d.read_bytes(length, "ByteArray")?;
         if length != N {
             return Err(d.array_size_error("ByteArray", N, length));
@@ -828,7 +871,7 @@ impl<R: Read> Decoder<R> {
             5 => self.read_f32().map(|_| ()),
             6 => self.read_f64().map(|_| ()),
             7 => {
-                let n = self.read_count("ByteArray")?;
+                let n = self.read_count("Int32")?;
                 self.read_bytes(n, "ByteArray").map(|_| ())
             }
             8 => self.read_string_bytes().map(|_| ()),
@@ -837,7 +880,11 @@ impl<R: Read> Decoder<R> {
                 if elem > 12 {
                     return Err(self.unknown_tag("Slice", elem));
                 }
-                let count = self.read_count("Slice")?;
+                let count = self.read_i32().map_err(|_| self.buffer_error("Int32"))?;
+                if count < 0 {
+                    panic!("runtime error: makeslice: len out of range");
+                }
+                let count = count as usize;
                 for _ in 0..count {
                     self.read_tag_payload_to_discard(elem)?;
                 }
