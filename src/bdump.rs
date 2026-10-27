@@ -404,6 +404,8 @@ pub fn verify_stream(bytes: &[u8]) -> Result<SignatureStatus> {
     let signature = &bytes[sign_at..bytes.len() - trailer];
     if !signature.starts_with(&[0, 0x8b]) {
         status.legacy = true;
+        status.username =
+            Some("Unknown User(This file is using a deprecated signing method)".into());
         return Ok(status);
     }
     if signature.len() < 4 {

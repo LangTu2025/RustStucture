@@ -374,6 +374,10 @@ fn bdx_auxiliary_commands_and_signature_bounds() {
     assert!(verify_stream(&[88, 1, 255, 90]).is_err());
     let legacy = verify_stream(&[65, 88, 1, 2, 2, 90]).unwrap();
     assert!(legacy.signed && legacy.legacy && !legacy.corrupted);
+    assert_eq!(
+        legacy.username.as_deref(),
+        Some("Unknown User(This file is using a deprecated signing method)")
+    );
 }
 
 #[test]
