@@ -1558,6 +1558,124 @@ fn nbt_encoder_matches_go_scalar_compound_tags_and_typed_empty_containers() {
 }
 
 #[test]
+fn nbt_decoder_matches_go_streaming_mutation_and_field_rules() {
+    #[derive(Default, nbt::NbtDecode)]
+    struct Embedded {
+        #[nbt(rename = "nested")]
+        value: i32,
+    }
+    #[derive(Default, nbt::NbtDecode)]
+    struct Record {
+        #[nbt(rename = "renamed,omitempty")]
+        value: i32,
+        #[nbt(skip)]
+        ignored: i32,
+        #[nbt(flatten)]
+        embedded: Embedded,
+    }
+    #[derive(Default, nbt::NbtDecode)]
+    struct GenericRecord<T: Default> {
+        value: T,
+    }
+
+    let mut input = vec![10, 0];
+    input.extend([3, 7]);
+    input.extend_from_slice(b"renamed");
+    input.push(14);
+    input.extend([3, 6]);
+    input.extend_from_slice(b"nested");
+    input.push(18);
+    input.push(0);
+    let mut decoder = nbt::Decoder::new(input.as_slice());
+    let mut record = Record {
+        value: 1,
+        ignored: 42,
+        embedded: Embedded { value: 2 },
+    };
+    decoder.decode(&mut record).unwrap();
+    assert_eq!(record.value, 7);
+    assert_eq!(record.ignored, 42);
+    assert_eq!(record.embedded.value, 9);
+    assert_eq!(decoder.get_offset(), input.len() as u64);
+
+    let mut generic = nbt::Decoder::new([10, 0, 3, 5, b'v', b'a', b'l', b'u', b'e', 4, 0].as_slice());
+    let mut generic_record = GenericRecord { value: 0i32 };
+    generic.decode(&mut generic_record).unwrap();
+    assert_eq!(generic_record.value, 2);
+
+    let mut partial = vec![10, 0, 3, 7];
+    partial.extend_from_slice(b"renamed");
+    partial.push(14);
+    partial.extend([3, 7]);
+    partial.extend_from_slice(b"unknown");
+    partial.extend([18, 0]);
+    let mut decoder = nbt::Decoder::with_encoding(partial.as_slice(), Encoding::NetworkLittleEndian);
+    let mut record = Record::default();
+    let error = decoder.decode(&mut record).unwrap_err().to_string();
+    assert_eq!(record.value, 7);
+    assert_eq!(decoder.get_offset(), 21);
+    assert_eq!(
+        error,
+        "nbt: 在偏移 21 处遇到意外命名标签 'unknown' 类型为 TAG_Int: 目标结构中不存在"
+    );
+
+    let mut scalar_bytes = [3, 0, 0, 0, 0, 0, 42, 3, 0, 0, 0, 0, 0, 7].as_slice();
+    let mut decoder = nbt::Decoder::with_encoding(&mut scalar_bytes, Encoding::BigEndian);
+    let mut first = 0i32;
+    let mut second = 0i32;
+    decoder.decode(&mut first).unwrap();
+    decoder.decode(&mut second).unwrap();
+    assert_eq!((first, second, decoder.get_offset()), (42, 7, 14));
+
+    let mut zero_decoder = nbt::Decoder::new([0].as_slice());
+    let mut zero = 12i32;
+    assert!(zero_decoder.decode(&mut zero).is_err());
+    assert_eq!(zero, 12);
+    let mut zero_decoder = nbt::Decoder::new([0].as_slice());
+    zero_decoder.allow_zero = true;
+    zero_decoder.decode(&mut zero).unwrap();
+    assert_eq!((zero, zero_decoder.get_offset()), (12, 1));
+
+    let bytes = [7, 0, 0, 0, 0, 0, 2, 1, 2];
+    let mut decoder = nbt::Decoder::with_encoding(bytes.as_slice(), Encoding::BigEndian);
+    let mut wrong_size = [9u8; 1];
+    assert_eq!(
+        decoder.decode(&mut wrong_size).unwrap_err().to_string(),
+        "nbt: 在偏移 9 的操作 'ByteArray' 处数组大小不匹配: 期望 1, 实际 2"
+    );
+    assert_eq!((wrong_size, decoder.get_offset()), ([9], 9));
+
+    let bytes = [3, 0, 0, 0, 0, 0, 0, 42];
+    let mut decoder = nbt::Decoder::with_encoding(bytes.as_slice(), Encoding::BigEndian);
+    let mut wrong_type = 9i64;
+    assert_eq!(
+        decoder.decode(&mut wrong_type).unwrap_err().to_string(),
+        "nbt: 在偏移 7 的标签 '' 类型无效: 无法将 TAG_Int 反序列化为 int64"
+    );
+    assert_eq!((wrong_type, decoder.get_offset()), (9, 7));
+
+    let mut decoder = nbt::Decoder::new([9, 0, 3, 0].as_slice());
+    let mut not_a_list = 9i32;
+    assert_eq!(
+        decoder.decode(&mut not_a_list).unwrap_err().to_string(),
+        "nbt: 在偏移 3 的标签 '' 类型无效: 无法将 TAG_List 反序列化为 int32"
+    );
+    assert_eq!((not_a_list, decoder.get_offset()), (9, 3));
+
+    let mut zero_byte_list = [9, 0, 1, 0].as_slice();
+    let mut decoder = nbt::Decoder::new(&mut zero_byte_list);
+    let mut list = vec![true];
+    decoder.decode(&mut list).unwrap();
+    assert!(list.is_empty());
+
+    let raw = [8, 0, 0, 1, 0, 0xff];
+    let mut decoder = nbt::Decoder::with_encoding(raw.as_slice(), Encoding::LittleEndian);
+    let mut raw_string = nbt::RawString(Vec::new());
+    decoder.decode(&mut raw_string).unwrap();
+    assert_eq!(raw_string.0, [0xff]);
+}
+
+#[test]
 fn tag_writer_write_tag_byte_appends_raw_byte_values() {
     let mut writer = nbt::Writer::new(Encoding::BigEndian);
     writer.write_tag_byte(0).unwrap();

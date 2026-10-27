@@ -560,6 +560,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "nbt-decode-derive"
+version = "0.1.0"
+
+[[package]]
 name = "num-bigint-dig"
 version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -805,6 +809,7 @@ dependencies = [
  "hex",
  "image",
  "md-5",
+ "nbt-decode-derive",
  "rmp-serde",
  "rsa",
  "serde",

@@ -6,11 +6,15 @@ use std::{
 };
 mod encoder;
 pub use encoder::{Encoder, RawString, TypedArray, TypedList, is_default};
+mod decoder;
+pub use decoder::{Decoder, NbtDecode, unmarshal, unmarshal_with_encoding};
+pub use nbt_decode_derive::NbtDecode;
 pub type Compound = BTreeMap<String, Nbt>;
 pub type RawCompound = BTreeMap<Vec<u8>, Nbt>;
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(tag = "type", content = "value")]
 pub enum Nbt {
+    #[default]
     End,
     Byte(i8),
     Short(i16),

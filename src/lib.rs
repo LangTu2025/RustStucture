@@ -1,3 +1,5 @@
+extern crate self as rust_water_structure;
+
 pub mod api;
 pub mod bdump;
 pub mod blocks;
