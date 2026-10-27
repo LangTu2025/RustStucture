@@ -458,6 +458,44 @@ fn bdx_real_go_signatures_match_verified_usernames() {
             "{filename}"
         );
         assert!(!status.legacy, "{filename}");
+
+        let trailer_end = decompressed.len();
+        let (signature_length, trailer_length) = if decompressed[trailer_end - 2] == 255 {
+            (
+                usize::from(u16::from_be_bytes(
+                    decompressed[trailer_end - 4..trailer_end - 2]
+                        .try_into()
+                        .unwrap(),
+                )),
+                4,
+            )
+        } else {
+            (usize::from(decompressed[trailer_end - 2]), 2)
+        };
+        let signature_start = trailer_end - signature_length - trailer_length;
+        let mut signature = decompressed[signature_start..trailer_end - trailer_length].to_vec();
+        let cert_length = usize::from(u16::from_le_bytes(signature[2..4].try_into().unwrap()));
+        let cert_end = 4 + cert_length;
+        signature.insert(cert_end, b'g');
+        signature[2..4].copy_from_slice(&u16::try_from(cert_length + 1).unwrap().to_le_bytes());
+
+        let mut malformed_hex = decompressed[..signature_start].to_vec();
+        malformed_hex.extend_from_slice(&signature);
+        if signature.len() < 255 {
+            malformed_hex.push(signature.len() as u8);
+        } else {
+            malformed_hex.extend_from_slice(&u16::try_from(signature.len()).unwrap().to_be_bytes());
+            malformed_hex.push(255);
+        }
+        malformed_hex.push(90);
+
+        let status = verify_stream(&malformed_hex).unwrap();
+        assert!(status.signed && !status.corrupted, "{filename}");
+        assert_eq!(
+            status.username.as_deref(),
+            Some(expected_username),
+            "{filename} malformed hex suffix"
+        );
     }
 }
 

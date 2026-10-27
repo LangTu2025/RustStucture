@@ -216,6 +216,30 @@ fn go_username_field(content: &str) -> &str {
         .unwrap_or_else(|| panic!("BDX certificate username index out of range"))
 }
 
+fn go_decode_hex_prefix(value: &str) -> Vec<u8> {
+    let mut decoded = Vec::with_capacity(value.len() / 2);
+    let (pairs, _) = value.as_bytes().as_chunks::<2>();
+    for pair in pairs {
+        let Some(high) = hex_digit(pair[0]) else {
+            break;
+        };
+        let Some(low) = hex_digit(pair[1]) else {
+            break;
+        };
+        decoded.push((high << 4) | low);
+    }
+    decoded
+}
+
+fn hex_digit(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
+}
+
 fn write_string(output: &mut Vec<u8>, value: &str) -> Result<()> {
     if value.contains('\0') {
         return Err(Error::invalid("BDX 字符串包含 NUL"));
@@ -446,8 +470,7 @@ pub fn verify_stream(bytes: &[u8]) -> Result<SignatureStatus> {
             .ok_or_else(|| Error::invalid("BDX 证书分隔符错误"))?;
         let server_key =
             RsaPublicKey::from_pkcs1_pem(SERVER_KEY).map_err(|e| Error::Other(e.to_string()))?;
-        let cert_signature =
-            hex::decode(cert_signature).map_err(|e| Error::invalid(e.to_string()))?;
+        let cert_signature = go_decode_hex_prefix(cert_signature);
         server_key
             .verify(
                 Pkcs1v15Sign::new::<Sha256>(),
@@ -476,12 +499,20 @@ pub fn verify_stream(bytes: &[u8]) -> Result<SignatureStatus> {
 
 #[cfg(test)]
 mod signature_tests {
-    use super::go_username_field;
+    use super::{go_decode_hex_prefix, go_username_field};
 
     #[test]
     fn username_field_matches_go_split_index() {
         assert_eq!(go_username_field("key|username|ignored"), "username");
         assert_eq!(go_username_field("key||ignored"), "");
         assert!(std::panic::catch_unwind(|| go_username_field("key")).is_err());
+    }
+
+    #[test]
+    fn certificate_hex_decode_keeps_the_decoded_prefix() {
+        assert_eq!(go_decode_hex_prefix("00aFbc"), [0, 0xaf, 0xbc]);
+        assert_eq!(go_decode_hex_prefix("00afg"), [0, 0xaf]);
+        assert_eq!(go_decode_hex_prefix("00afzz"), [0, 0xaf]);
+        assert!(go_decode_hex_prefix("g0").is_empty());
     }
 }
