@@ -370,7 +370,14 @@ fn bdx_auxiliary_commands_and_signature_bounds() {
     assert_eq!(reader.read().unwrap(), Some(Command::NoOperation));
     assert_eq!(reader.read().unwrap(), Some(Command::Terminate));
     assert!(!verify_stream(b"BDX\0\0XE").unwrap().signed);
-    assert!(verify_stream(&[90]).is_err());
+    for bytes in [
+        &[90][..],
+        &[65, 90][..],
+        &[65, 0, 90][..],
+        &[65, 0, 1, 90][..],
+    ] {
+        assert!(std::panic::catch_unwind(|| verify_stream(bytes)).is_err());
+    }
     assert_eq!(
         verify_stream(&[88, 1, 255, 90]).unwrap_err().to_string(),
         "Too long signature"
@@ -385,6 +392,12 @@ fn bdx_auxiliary_commands_and_signature_bounds() {
     assert!(legacy.signed && legacy.legacy && !legacy.corrupted);
     assert_eq!(
         legacy.username.as_deref(),
+        Some("Unknown User(This file is using a deprecated signing method)")
+    );
+    let one_byte_legacy = verify_stream(&[65, 1, 1, 90]).unwrap();
+    assert!(one_byte_legacy.signed && one_byte_legacy.legacy && !one_byte_legacy.corrupted);
+    assert_eq!(
+        one_byte_legacy.username.as_deref(),
         Some("Unknown User(This file is using a deprecated signing method)")
     );
 }

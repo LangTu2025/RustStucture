@@ -378,12 +378,12 @@ pub fn verify_stream(bytes: &[u8]) -> Result<SignatureStatus> {
     }
     status.signed = true;
     if bytes.len() < 3 {
-        return Err(Error::invalid("BDX 签名尾部截断"));
+        panic!("BDX signature trailer index out of range");
     }
     let length_byte = bytes[bytes.len() - 2];
     let (length, trailer) = if length_byte == 255 {
         if bytes.len() < 4 {
-            return Err(Error::invalid("BDX 长签名尾部截断"));
+            panic!("BDX extended signature trailer index out of range");
         }
         (
             usize::from(u16::from_be_bytes(
@@ -400,11 +400,14 @@ pub fn verify_stream(bytes: &[u8]) -> Result<SignatureStatus> {
     let sign_at = bytes
         .len()
         .checked_sub(length + trailer)
-        .ok_or_else(|| Error::invalid("BDX 签名长度越界"))?;
+        .unwrap_or_else(|| panic!("BDX signature slice bounds out of range"));
     let body_end = sign_at
         .checked_sub(1)
-        .ok_or_else(|| Error::invalid("BDX 缺少签名标记"))?;
+        .unwrap_or_else(|| panic!("BDX signed body slice bounds out of range"));
     let signature = &bytes[sign_at..bytes.len() - trailer];
+    if signature.is_empty() || (signature[0] == 0 && signature.len() < 2) {
+        panic!("BDX signature index out of range");
+    }
     if !signature.starts_with(&[0, 0x8b]) {
         status.legacy = true;
         status.username =
