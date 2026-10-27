@@ -423,8 +423,13 @@ pub fn verify_stream(bytes: &[u8]) -> Result<SignatureStatus> {
         status.corrupted = true;
         return Ok(status);
     };
-    let certificate =
-        std::str::from_utf8(certificate).map_err(|_| Error::invalid("BDX 证书不是UTF-8"))?;
+    let certificate = match std::str::from_utf8(certificate) {
+        Ok(certificate) => certificate,
+        Err(_) => {
+            status.corrupted = true;
+            return Ok(status);
+        }
+    };
     let validate = || -> Result<String> {
         let (content, cert_signature) = certificate
             .split_once("::")

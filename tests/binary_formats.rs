@@ -407,6 +407,17 @@ fn bdx_truncated_v2_certificates_match_go_corrupted_status() {
 }
 
 #[test]
+fn bdx_non_utf8_v2_certificate_matches_go_corrupted_status() {
+    use rust_water_structure::bdump::verify_stream;
+
+    let status = verify_stream(&[65, 0, 0x8b, 1, 0, 0xff, 5, 90]).unwrap();
+    assert!(status.signed);
+    assert!(status.corrupted);
+    assert!(status.username.is_none());
+    assert!(!status.legacy);
+}
+
+#[test]
 fn bdx_reads_117_pool_and_rejects_unknown_pool() {
     // 117池中 134 是 air，0 是 acacia_button:0，独立于当前 runtime ID 池。
     let wire = b"BDX\0\0\x1f\x75\x20\x00\x00XE";
