@@ -478,15 +478,21 @@ impl<'a> Reader<'a> {
             .map_err(|_| Error::invalid("NBT 标签名称 UTF-8 无效"))
     }
     pub fn byte_array(&mut self) -> Result<Vec<u8>> {
-        let n = self.int()?;
+        let n = self
+            .int()
+            .map_err(|_| Error::invalid("nbt: 操作 'Int32' 期间缓冲区意外结束"))?;
         if n < 0 {
-            return Err(Error::invalid("NBT 数组长度为负数"));
+            return Err(Error::invalid(
+                "nbt: 操作 'ReadTagByteArray' 期间缓冲区意外结束",
+            ));
         }
         let n = n as usize;
         let available = self.data.len().saturating_sub(self.pos);
         if n > available {
             self.pos += available;
-            return Err(Error::invalid("NBT 数组越界"));
+            return Err(Error::invalid(
+                "nbt: 操作 'ReadTagByteArray' 期间缓冲区意外结束",
+            ));
         }
         Ok(self.take(n)?.to_vec())
     }

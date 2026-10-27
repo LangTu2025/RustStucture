@@ -945,15 +945,44 @@ fn tag_reader_read_tag_byte_array() {
 #[test]
 fn tag_reader_read_tag_byte_array_negative_length() {
     let mut reader = nbt::Reader::new(&[255, 255, 255, 255], Encoding::LittleEndian);
-    assert!(reader.byte_array().is_err());
+    assert_eq!(
+        reader.byte_array().unwrap_err().to_string(),
+        "nbt: 操作 'ReadTagByteArray' 期间缓冲区意外结束"
+    );
     assert_eq!(reader.pos, 4);
 }
 
 #[test]
 fn tag_reader_read_tag_byte_array_truncated_payload_consumes_available_bytes() {
     let mut reader = nbt::Reader::new(&[3, 0, 0, 0, 1, 2], Encoding::LittleEndian);
-    assert!(reader.byte_array().is_err());
+    assert_eq!(
+        reader.byte_array().unwrap_err().to_string(),
+        "nbt: 操作 'ReadTagByteArray' 期间缓冲区意外结束"
+    );
     assert_eq!(reader.pos, 6);
+}
+
+#[test]
+fn tag_reader_read_tag_byte_array_truncated_length_preserves_encoding_error() {
+    for encoding in [
+        Encoding::LittleEndian,
+        Encoding::BigEndian,
+        Encoding::NetworkLittleEndian,
+    ] {
+        let input: &[u8] = if encoding == Encoding::NetworkLittleEndian {
+            &[0x80, 0x80, 0x80, 0x80]
+        } else {
+            &[0, 0, 0]
+        };
+        let mut reader = nbt::Reader::new(input, encoding);
+        assert_eq!(
+            reader.byte_array().unwrap_err().to_string(),
+            "nbt: 操作 'Int32' 期间缓冲区意外结束",
+            "{encoding:?}"
+        );
+        let expected_pos = input.len() + usize::from(encoding == Encoding::NetworkLittleEndian);
+        assert_eq!(reader.pos, expected_pos, "{encoding:?}");
+    }
 }
 
 #[test]
