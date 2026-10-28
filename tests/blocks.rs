@@ -140,3 +140,133 @@ fn bedrock_properties_match_go_fuzzy_runtime_search() {
         BlockState::air()
     );
 }
+
+#[test]
+#[ignore = "Go baseline probe: the matching Rust string-state entry point is not implemented yet"]
+fn block_name_and_state_str_to_runtime_id_go_baseline() {
+    let cases = [
+        (
+            "exact",
+            "minecraft:oak_stairs",
+            "upside_down_bit=0b,weirdo_direction=2",
+            BlockState {
+                name: "minecraft:oak_stairs".into(),
+                properties: [
+                    ("upside_down_bit".into(), Nbt::Byte(0)),
+                    ("weirdo_direction".into(), Nbt::Int(2)),
+                ]
+                .into_iter()
+                .collect(),
+            },
+        ),
+        (
+            "bool_string",
+            "minecraft:oak_stairs",
+            "upside_down_bit=false,weirdo_direction=2",
+            BlockState {
+                name: "minecraft:oak_stairs".into(),
+                properties: [
+                    ("upside_down_bit".into(), Nbt::Byte(0)),
+                    ("weirdo_direction".into(), Nbt::Int(2)),
+                ]
+                .into_iter()
+                .collect(),
+            },
+        ),
+        (
+            "bool_nonzero_int",
+            "minecraft:oak_stairs",
+            "upside_down_bit=2,weirdo_direction=2",
+            BlockState {
+                name: "minecraft:oak_stairs".into(),
+                properties: [
+                    ("upside_down_bit".into(), Nbt::Byte(1)),
+                    ("weirdo_direction".into(), Nbt::Int(2)),
+                ]
+                .into_iter()
+                .collect(),
+            },
+        ),
+        (
+            "extra_property",
+            "minecraft:oak_stairs",
+            "upside_down_bit=0b,weirdo_direction=2,extra=1",
+            BlockState {
+                name: "minecraft:oak_stairs".into(),
+                properties: [
+                    ("upside_down_bit".into(), Nbt::Byte(0)),
+                    ("weirdo_direction".into(), Nbt::Int(2)),
+                ]
+                .into_iter()
+                .collect(),
+            },
+        ),
+        (
+            "unknown_value",
+            "minecraft:oak_stairs",
+            "upside_down_bit=0b,weirdo_direction=unknown",
+            BlockState {
+                name: "minecraft:oak_stairs".into(),
+                properties: [
+                    ("upside_down_bit".into(), Nbt::Byte(0)),
+                    ("weirdo_direction".into(), Nbt::Int(0)),
+                ]
+                .into_iter()
+                .collect(),
+            },
+        ),
+        (
+            "duplicate_last_wins",
+            "minecraft:oak_stairs",
+            "upside_down_bit=0b,upside_down_bit=1b,weirdo_direction=2",
+            BlockState {
+                name: "minecraft:oak_stairs".into(),
+                properties: [
+                    ("upside_down_bit".into(), Nbt::Byte(1)),
+                    ("weirdo_direction".into(), Nbt::Int(2)),
+                ]
+                .into_iter()
+                .collect(),
+            },
+        ),
+        (
+            "empty_state",
+            "minecraft:oak_stairs",
+            "",
+            BlockState {
+                name: "minecraft:oak_stairs".into(),
+                properties: [
+                    ("upside_down_bit".into(), Nbt::Byte(0)),
+                    ("weirdo_direction".into(), Nbt::Int(0)),
+                ]
+                .into_iter()
+                .collect(),
+            },
+        ),
+        (
+            "malformed_state",
+            "minecraft:oak_stairs",
+            "facing",
+            BlockState::air(),
+        ),
+        (
+            "unknown_name",
+            "minecraft:not_a_real_block",
+            "",
+            BlockState::air(),
+        ),
+    ];
+    let mismatches: Vec<_> = cases
+        .iter()
+        .filter_map(|(label, name, state, expected)| {
+            let actual = blocks::java(&format!("{name}[{state}]"));
+            (actual != *expected)
+                .then(|| format!("{label}: actual={actual:?}, expected={expected:?}"))
+        })
+        .collect();
+    assert!(
+        mismatches.is_empty(),
+        "Go baseline mismatches:\n{}",
+        mismatches.join("\n")
+    );
+}
