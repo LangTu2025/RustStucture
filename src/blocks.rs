@@ -239,6 +239,355 @@ fn equivalent(a: &Nbt, b: &Nbt) -> bool {
         || a.scalar_string().trim_matches('"') == b.scalar_string().trim_matches('"')
 }
 
+#[derive(Clone, Debug)]
+enum SearchValue {
+    Bool(bool),
+    Int(i32),
+    String { value: Vec<u8>, number: Option<i32> },
+}
+
+impl SearchValue {
+    fn has_bool(&self) -> bool {
+        match self {
+            Self::Bool(_) => true,
+            Self::Int(value) => matches!(value, 0 | 1),
+            Self::String { number, .. } => number.is_some_and(|value| matches!(value, 0 | 1)),
+        }
+    }
+
+    fn bool_value(&self) -> bool {
+        match self {
+            Self::Bool(value) => *value,
+            Self::Int(value) => *value == 1,
+            Self::String { number, .. } => number == &Some(1),
+        }
+    }
+
+    fn has_int(&self) -> bool {
+        match self {
+            Self::Bool(_) | Self::Int(_) => true,
+            Self::String { number, .. } => number.is_some(),
+        }
+    }
+
+    fn int_value(&self) -> i32 {
+        match self {
+            Self::Bool(value) => i32::from(*value),
+            Self::Int(value) => *value,
+            Self::String { number, .. } => number.unwrap(),
+        }
+    }
+
+    fn string_value(&self) -> Vec<u8> {
+        match self {
+            Self::Bool(value) => {
+                if *value {
+                    b"true".to_vec()
+                } else {
+                    b"false".to_vec()
+                }
+            }
+            Self::Int(value) => value.to_string().into_bytes(),
+            Self::String { value, .. } => value.clone(),
+        }
+    }
+
+    fn precise_value(&self) -> Vec<u8> {
+        if self.has_bool() {
+            let value = self.bool_value();
+            match self {
+                Self::Bool(_) => {
+                    return if value { b"1b" } else { b"0b" }.to_vec();
+                }
+                Self::String { value: text, .. }
+                    if text == b"true" || text == b"1b" || text == b"false" || text == b"0b" =>
+                {
+                    return if value { b"1b" } else { b"0b" }.to_vec();
+                }
+                _ => {}
+            }
+        }
+        self.string_value()
+    }
+
+    fn fuzzy_equal(&self, other: &Self) -> bool {
+        match self {
+            Self::Bool(value) => {
+                if other.has_bool() {
+                    *value == other.bool_value()
+                } else if other.has_int() {
+                    if other.int_value() == 0 {
+                        !value
+                    } else {
+                        *value
+                    }
+                } else {
+                    let text = other.string_value();
+                    if *value {
+                        matches!(text.as_slice(), b"true" | b"1b" | b"1")
+                    } else {
+                        matches!(text.as_slice(), b"false" | b"0b" | b"0")
+                    }
+                }
+            }
+            Self::Int(value) => {
+                if other.has_bool() {
+                    if self.has_bool() {
+                        self.bool_value() == other.bool_value()
+                    } else {
+                        other.fuzzy_equal(self)
+                    }
+                } else if other.has_int() {
+                    *value == other.int_value()
+                } else {
+                    let text = other.string_value();
+                    if *value == 1 {
+                        matches!(text.as_slice(), b"true" | b"1b" | b"1")
+                    } else if *value == 0 {
+                        matches!(text.as_slice(), b"false" | b"0b" | b"0")
+                    } else {
+                        value.to_string().as_bytes() == text
+                    }
+                }
+            }
+            Self::String { value, .. } => {
+                if other.has_bool() {
+                    if self.has_bool() {
+                        self.bool_value() == other.bool_value()
+                    } else {
+                        other.fuzzy_equal(self)
+                    }
+                } else if other.has_int() {
+                    if self.has_int() {
+                        self.int_value() == other.int_value()
+                    } else {
+                        other.fuzzy_equal(self)
+                    }
+                } else {
+                    *value == other.string_value()
+                }
+            }
+        }
+    }
+}
+
+fn search_string(mut value: Vec<u8>, remove_all_quotes: bool) -> SearchValue {
+    if remove_all_quotes {
+        value.retain(|byte| *byte != b'"');
+    }
+    if value.first() == Some(&b'"') {
+        value.remove(0);
+    }
+    if value.last() == Some(&b'"') {
+        value.pop();
+    }
+    let number = if matches!(value.as_slice(), b"true" | b"1b" | b"1") {
+        Some(1)
+    } else if matches!(value.as_slice(), b"false" | b"0b" | b"0") {
+        Some(0)
+    } else {
+        std::str::from_utf8(&value)
+            .ok()
+            .and_then(|value| value.parse::<i64>().ok())
+            .map(|value| value as i32)
+            .filter(|value| *value != -1)
+    };
+    SearchValue::String { value, number }
+}
+
+fn go_format_nbt(value: &Nbt) -> String {
+    match value {
+        Nbt::End => "<nil>".into(),
+        Nbt::Byte(value) => value.to_string(),
+        Nbt::Short(value) => value.to_string(),
+        Nbt::Int(value) => value.to_string(),
+        Nbt::Long(value) => value.to_string(),
+        Nbt::Float(value) => value.to_string(),
+        Nbt::Double(value) => value.to_string(),
+        Nbt::ByteArray(values) => format!(
+            "[{}]",
+            values
+                .iter()
+                .map(|value| (*value as u8).to_string())
+                .collect::<Vec<_>>()
+                .join(" ")
+        ),
+        Nbt::String(value) => value.clone(),
+        Nbt::RawString(value) => String::from_utf8_lossy(value).into_owned(),
+        Nbt::List(values) => format!(
+            "[{}]",
+            values
+                .iter()
+                .map(go_format_nbt)
+                .collect::<Vec<_>>()
+                .join(" ")
+        ),
+        Nbt::Compound(values) => format!(
+            "map[{}]",
+            values
+                .iter()
+                .map(|(key, value)| format!("{key}:{}", go_format_nbt(value)))
+                .collect::<Vec<_>>()
+                .join(" ")
+        ),
+        Nbt::RawCompound(values) => format!(
+            "map[{}]",
+            values
+                .iter()
+                .map(|(key, value)| format!(
+                    "{}:{}",
+                    String::from_utf8_lossy(key),
+                    go_format_nbt(value)
+                ))
+                .collect::<Vec<_>>()
+                .join(" ")
+        ),
+        Nbt::IntArray(values) => format!(
+            "[{}]",
+            values
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(" ")
+        ),
+        Nbt::LongArray(values) => format!(
+            "[{}]",
+            values
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(" ")
+        ),
+    }
+}
+
+fn query_value(value: &Nbt) -> std::result::Result<SearchValue, String> {
+    match value {
+        Nbt::Byte(value) if *value == 0 || *value == 1 => Ok(SearchValue::Bool(*value != 0)),
+        Nbt::Byte(value) => Err(format!(
+            "as an uint8 in prop, value should be 0 or 1, get {}",
+            *value as u8
+        )),
+        Nbt::Int(value) => Ok(SearchValue::Int(*value)),
+        Nbt::Double(value) => Ok(SearchValue::Int(go_float64_to_i32(*value))),
+        Nbt::String(value) => Ok(search_string(value.as_bytes().to_vec(), true)),
+        Nbt::RawString(value) => Ok(search_string(value.clone(), true)),
+        value => Err(format!(
+            "as a prop value from nbt, value can only be uint8/int32/string, get {}",
+            go_format_nbt(value)
+        )),
+    }
+}
+
+fn go_float64_to_i32(value: f64) -> i32 {
+    if !value.is_finite() || value >= 2_147_483_648.0 || value < -2_147_483_648.0 {
+        i32::MIN
+    } else {
+        value.trunc() as i32
+    }
+}
+
+fn normalized_properties(properties: &Compound) -> BTreeMap<String, SearchValue> {
+    properties
+        .iter()
+        .map(|(key, value)| {
+            (
+                key.replace('"', "").replace("minecraft:", ""),
+                match value {
+                    Nbt::Byte(value) if *value == 0 || *value == 1 => {
+                        SearchValue::Bool(*value != 0)
+                    }
+                    Nbt::Byte(value) => search_string(format!("{}b", value).into_bytes(), false),
+                    Nbt::Int(value) => SearchValue::Int(*value),
+                    Nbt::String(value) => search_string(value.as_bytes().to_vec(), false),
+                    Nbt::RawString(value) => search_string(value.clone(), false),
+                    Nbt::Short(value) => search_string(format!("{value}s").into_bytes(), false),
+                    Nbt::Long(value) => search_string(format!("{value}l").into_bytes(), false),
+                    Nbt::Float(value) => search_string(format!("{value}f").into_bytes(), false),
+                    Nbt::Double(value) => search_string(value.to_string().into_bytes(), false),
+                    other => search_string(nbt::to_snbt(other).into_bytes(), false),
+                },
+            )
+        })
+        .collect()
+}
+
+fn precise_properties(properties: &BTreeMap<String, SearchValue>) -> Vec<u8> {
+    let mut output = Vec::from(b"{".as_slice());
+    for (index, (key, value)) in properties.iter().enumerate() {
+        if index != 0 {
+            output.push(b',');
+        }
+        output.extend_from_slice(key.as_bytes());
+        output.push(b':');
+        output.extend_from_slice(&value.precise_value());
+    }
+    output.push(b'}');
+    output
+}
+
+fn property_score(candidate: &Compound, query: &BTreeMap<String, SearchValue>) -> (u8, u8) {
+    if query.is_empty() {
+        return (0, 0);
+    }
+    let candidate = normalized_properties(candidate);
+    let mut same = 0u8;
+    let mut different = 0u8;
+    let mut redundant = 0u8;
+    let mut missing = 0u8;
+    for (key, query_value) in query {
+        match candidate.get(key) {
+            Some(candidate_value) if candidate_value.fuzzy_equal(query_value) => {
+                same = same.wrapping_add(1);
+            }
+            Some(_) => different = different.wrapping_add(1),
+            None => redundant = redundant.wrapping_add(1),
+        }
+    }
+    for key in candidate.keys() {
+        if !query.contains_key(key) {
+            missing = missing.wrapping_add(1);
+        }
+    }
+    (
+        same,
+        different.wrapping_add(redundant).wrapping_add(missing),
+    )
+}
+
+fn bedrock_candidate(name: &str, query: &BTreeMap<String, SearchValue>) -> Option<BlockState> {
+    let mut names = name.trim().split(':');
+    let block_name = match (names.next()?, names.next(), names.next()) {
+        (name, None, None) => name,
+        (_, Some(name), None) => name,
+        _ => panic!("invalid block name namespace"),
+    };
+    let registry = registry();
+    let group = registry.groups.get(block_name)?;
+    let precise = precise_properties(query);
+    let (id, _) = group
+        .states
+        .iter()
+        .find(|(properties, _)| precise_properties(&normalized_properties(properties)) == precise)
+        .map(|(_, id)| (*id, (0, 0)))
+        .or_else(|| {
+            group
+                .states
+                .iter()
+                .map(|(properties, id)| (*id, property_score(properties, query)))
+                .reduce(|best, candidate| {
+                    if candidate.1.0 > best.1.0
+                        || (candidate.1.0 == best.1.0 && candidate.1.1 < best.1.1)
+                    {
+                        candidate
+                    } else {
+                        best
+                    }
+                })
+        })?;
+    registry.nemc.get(id).cloned()
+}
+
 fn best_match<'a, T>(candidates: &'a [(Compound, T)], query: &Compound) -> Option<&'a T> {
     if let Some((_, value)) = candidates.iter().find(|(properties, _)| {
         properties.len() == query.len()
@@ -316,7 +665,41 @@ pub fn java(text: &str) -> BlockState {
         .unwrap_or_else(|| BlockState::new("unknown"))
 }
 
+fn bedrock_fuzzy_lookup(
+    name: &str,
+    properties: &Compound,
+) -> std::result::Result<Option<BlockState>, String> {
+    let mut query = BTreeMap::new();
+    for (key, value) in properties {
+        let value = query_value(value)?;
+        query.insert(key.replace('"', "").replace("minecraft:", ""), value);
+    }
+    Ok(bedrock_candidate(name, &query))
+}
+
 pub fn bedrock(name: &str, properties: Compound) -> BlockState {
+    match bedrock_fuzzy_lookup(name, &properties) {
+        Ok(Some(state)) => state,
+        Ok(None) => BlockState::air(),
+        Err(error) => {
+            println!("{error}");
+            BlockState::air()
+        }
+    }
+}
+
+pub(crate) fn bedrock_fuzzy_runtime(name: &str, properties: Compound) -> BlockState {
+    match bedrock_fuzzy_lookup(name, &properties) {
+        Ok(Some(state)) => native_state(&state),
+        Ok(None) => BlockState::new("unknown"),
+        Err(error) => {
+            println!("{error}");
+            BlockState::new("unknown")
+        }
+    }
+}
+
+pub(crate) fn bedrock_exact(name: &str, properties: Compound) -> BlockState {
     native_state(&BlockState {
         name: BlockState::new(name).name,
         properties,
@@ -440,6 +823,56 @@ mod mapping_diagnostics {
             source.properties.get("minecraft:cardinal_direction"),
             Some(&Nbt::String("north".into())),
             "nemc id={id}, source={source:?}"
+        );
+    }
+
+    #[test]
+    fn float64_to_int32_matches_go_boundaries() {
+        assert_eq!(go_float64_to_i32(1.9), 1);
+        assert_eq!(go_float64_to_i32(-1.9), -1);
+        assert_eq!(go_float64_to_i32(2_147_483_647.0), i32::MAX);
+        assert_eq!(go_float64_to_i32(2_147_483_648.0), i32::MIN);
+        assert_eq!(go_float64_to_i32(-2_147_483_649.0), i32::MIN);
+        assert_eq!(go_float64_to_i32(f64::NAN), i32::MIN);
+        assert_eq!(go_float64_to_i32(f64::INFINITY), i32::MIN);
+        assert_eq!(go_float64_to_i32(f64::NEG_INFINITY), i32::MIN);
+    }
+
+    #[test]
+    fn fuzzy_string_sentinel_and_amd64_integer_narrowing_match_go() {
+        let minus_one = search_string(b"-1".to_vec(), false);
+        let padded_minus_one = search_string(b"-0001".to_vec(), false);
+        assert!(!minus_one.has_int());
+        assert!(!SearchValue::Bool(true).fuzzy_equal(&minus_one));
+        assert!(!SearchValue::Int(-1).fuzzy_equal(&padded_minus_one));
+
+        let wrapped = search_string(b"2147483648".to_vec(), false);
+        assert!(wrapped.has_int());
+        assert_eq!(wrapped.int_value(), i32::MIN);
+        assert!(SearchValue::Int(i32::MIN).fuzzy_equal(&wrapped));
+        let narrowed_minus_one = search_string(b"4294967295".to_vec(), false);
+        assert!(!narrowed_minus_one.has_int());
+        assert!(!SearchValue::Bool(true).fuzzy_equal(&narrowed_minus_one));
+    }
+
+    #[test]
+    fn fuzzy_empty_query_keeps_first_state_and_errors_use_go_value_format() {
+        let properties = [("facing".into(), Nbt::String("north".into()))]
+            .into_iter()
+            .collect();
+        assert_eq!(property_score(&properties, &BTreeMap::new()), (0, 0));
+        assert_eq!(go_format_nbt(&Nbt::Byte(-1)), "-1");
+        assert_eq!(
+            go_format_nbt(&Nbt::List(vec![Nbt::Int(1), Nbt::String("x".into())])),
+            "[1 x]"
+        );
+        assert_eq!(
+            query_value(&Nbt::Byte(-1)).unwrap_err(),
+            "as an uint8 in prop, value should be 0 or 1, get 255"
+        );
+        assert_eq!(
+            query_value(&Nbt::Byte(2)).unwrap_err(),
+            "as an uint8 in prop, value should be 0 or 1, get 2"
         );
     }
 }

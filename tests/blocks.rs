@@ -1,3 +1,4 @@
+use rust_water_structure::nbt::{Compound, Nbt};
 use rust_water_structure::{BlockState, blocks};
 
 #[test]
@@ -53,4 +54,89 @@ fn names_without_properties_use_go_default_anchor() {
     ] {
         assert_eq!(blocks::runtime_id(&blocks::java(name)), expected, "{name}");
     }
+}
+
+#[test]
+fn bedrock_properties_match_go_fuzzy_runtime_search() {
+    let mut exact = Compound::new();
+    exact.insert("upside_down_bit".into(), Nbt::Byte(0));
+    exact.insert("weirdo_direction".into(), Nbt::Int(2));
+    let state = blocks::bedrock("minecraft:oak_stairs", exact);
+    assert_eq!(state.name, "minecraft:oak_stairs");
+    assert_eq!(state.properties["upside_down_bit"], Nbt::Byte(0));
+    assert_eq!(state.properties["weirdo_direction"], Nbt::Int(2));
+
+    let mut float = Compound::new();
+    float.insert("upside_down_bit".into(), Nbt::Byte(0));
+    float.insert("weirdo_direction".into(), Nbt::Double(2.9));
+    let state = blocks::bedrock("minecraft:oak_stairs", float);
+    assert_eq!(state.name, "minecraft:oak_stairs");
+    assert_eq!(state.properties["weirdo_direction"], Nbt::Int(2));
+
+    let mut byte_string = Compound::new();
+    byte_string.insert("upside_down_bit".into(), Nbt::String("0b".into()));
+    byte_string.insert("weirdo_direction".into(), Nbt::Int(2));
+    let state = blocks::bedrock("minecraft:oak_stairs", byte_string);
+    assert_eq!(state.properties["upside_down_bit"], Nbt::Byte(0));
+    assert_eq!(state.properties["weirdo_direction"], Nbt::Int(2));
+
+    let mut extra = Compound::new();
+    extra.insert("upside_down_bit".into(), Nbt::Byte(0));
+    extra.insert("weirdo_direction".into(), Nbt::Int(2));
+    extra.insert("extra".into(), Nbt::Int(1));
+    let state = blocks::bedrock("minecraft:oak_stairs", extra);
+    assert_eq!(state.name, "minecraft:oak_stairs");
+    assert_eq!(state.properties["weirdo_direction"], Nbt::Int(2));
+
+    let mut unknown_value = Compound::new();
+    unknown_value.insert("upside_down_bit".into(), Nbt::Byte(0));
+    unknown_value.insert("weirdo_direction".into(), Nbt::String("unknown".into()));
+    let state = blocks::bedrock("minecraft:oak_stairs", unknown_value);
+    assert_eq!(state.name, "minecraft:oak_stairs");
+    assert_eq!(state.properties["weirdo_direction"], Nbt::Int(0));
+
+    let mut textual = Compound::new();
+    textual.insert("upside_down_bit".into(), Nbt::String("false".into()));
+    textual.insert("weirdo_direction".into(), Nbt::String("2".into()));
+    let state = blocks::bedrock("minecraft:oak_stairs", textual);
+    assert_eq!(state.name, "minecraft:oak_stairs");
+    assert_eq!(state.properties["upside_down_bit"], Nbt::Byte(0));
+    assert_eq!(state.properties["weirdo_direction"], Nbt::Int(2));
+
+    let mut nonzero_bool = Compound::new();
+    nonzero_bool.insert("upside_down_bit".into(), Nbt::Int(2));
+    nonzero_bool.insert("weirdo_direction".into(), Nbt::Int(2));
+    let state = blocks::bedrock("minecraft:oak_stairs", nonzero_bool);
+    assert_eq!(state.name, "minecraft:oak_stairs");
+    assert_eq!(state.properties["upside_down_bit"], Nbt::Byte(1));
+    assert_eq!(state.properties["weirdo_direction"], Nbt::Int(2));
+
+    let mut door = Compound::new();
+    door.insert("direction".into(), Nbt::Int(0));
+    door.insert("door_hinge_bit".into(), Nbt::Byte(0));
+    door.insert("open_bit".into(), Nbt::Byte(0));
+    door.insert("upper_block_bit".into(), Nbt::Byte(0));
+    let state = blocks::bedrock("minecraft:oak_door", door);
+    assert_eq!(state.name, "minecraft:wooden_door");
+    assert_eq!(state.properties["direction"], Nbt::Int(0));
+    assert_eq!(state.properties["door_hinge_bit"], Nbt::Byte(0));
+    assert_eq!(state.properties["open_bit"], Nbt::Byte(0));
+    assert_eq!(state.properties["upper_block_bit"], Nbt::Byte(1));
+
+    let mut invalid = Compound::new();
+    invalid.insert("open_bit".into(), Nbt::Long(1));
+    assert_eq!(
+        blocks::bedrock("minecraft:oak_door", invalid),
+        BlockState::air()
+    );
+    let mut invalid_byte = Compound::new();
+    invalid_byte.insert("open_bit".into(), Nbt::Byte(2));
+    assert_eq!(
+        blocks::bedrock("minecraft:oak_door", invalid_byte),
+        BlockState::air()
+    );
+    assert_eq!(
+        blocks::bedrock("minecraft:not_a_real_block", Compound::new()),
+        BlockState::air()
+    );
 }

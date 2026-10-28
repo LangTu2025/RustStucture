@@ -250,7 +250,7 @@ fn palette_state(value: &Nbt, bedrock: bool) -> Result<BlockState> {
         .cloned()
         .unwrap_or_default();
     if bedrock {
-        Ok(blocks::bedrock(name, properties))
+        Ok(blocks::bedrock_exact(name, properties))
     } else {
         let state = BlockState {
             name: name.into(),

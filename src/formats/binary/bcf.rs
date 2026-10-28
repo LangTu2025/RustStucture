@@ -83,7 +83,7 @@ pub(super) fn decode(bytes: &[u8]) -> Result<StructureData> {
             };
             states.insert(key.clone(), value);
         }
-        palette.insert(id, crate::blocks::bedrock(name, states));
+        palette.insert(id, crate::blocks::bedrock_fuzzy_runtime(name, states));
     }
     let mut offsets = seek(bytes, table_offset)?;
     let offset_count = offsets.u64()?;

@@ -60,7 +60,10 @@ fn parse_palette(metadata: &Compound) -> Result<Vec<Block>> {
                     *value = Nbt::Int(number as i32);
                 }
             }
-            Ok(blocks::bedrock(&format!("{namespace}:{name}"), properties))
+            Ok(blocks::bedrock_exact(
+                &format!("{namespace}:{name}"),
+                properties,
+            ))
         })
         .collect::<Result<_>>()?;
     entries
