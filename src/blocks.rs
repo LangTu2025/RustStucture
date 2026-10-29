@@ -395,6 +395,55 @@ fn search_string(mut value: Vec<u8>, remove_all_quotes: bool) -> SearchValue {
     SearchValue::String { value, number }
 }
 
+fn normalized_search_key(key: &str) -> String {
+    key.replace('"', "").replace("minecraft:", "")
+}
+
+fn split_search_property(fragment: &str) -> Option<(String, String)> {
+    let separator = if fragment.contains('=') { '=' } else { ':' };
+    let elements: Vec<_> = fragment.split(separator).collect();
+    (elements.len() == 2).then(|| (elements[0].to_owned(), elements[1].to_owned()))
+}
+
+fn string_search_value(value: &str) -> SearchValue {
+    match value {
+        "true" | "1b" => SearchValue::Bool(true),
+        "false" | "0b" => SearchValue::Bool(false),
+        _ => value
+            .parse::<i64>()
+            .map(|value| SearchValue::Int(value as i32))
+            .unwrap_or_else(|_| search_string(value.as_bytes().to_vec(), false)),
+    }
+}
+
+fn fuzzy_properties_from_string(
+    state: &str,
+) -> std::result::Result<BTreeMap<String, SearchValue>, String> {
+    let state = state.strip_prefix('{').unwrap_or(state);
+    let state = state.strip_suffix('}').unwrap_or(state);
+    let state = state.strip_prefix('[').unwrap_or(state);
+    let state = state.strip_suffix(']').unwrap_or(state);
+    let mut properties = BTreeMap::new();
+    for fragment in state
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+    {
+        let (key, value) = if let Some(pair) = split_search_property(fragment) {
+            pair
+        } else {
+            let normalized = fragment.replace("minecraft:", "");
+            split_search_property(&normalized)
+                .ok_or_else(|| format!("prop has no key-value structure: {normalized}"))?
+        };
+        properties.insert(
+            normalized_search_key(key.trim()),
+            string_search_value(value.trim()),
+        );
+    }
+    Ok(properties)
+}
+
 fn go_format_nbt(value: &Nbt) -> String {
     match value {
         Nbt::End => "<nil>".into(),
@@ -555,12 +604,15 @@ fn property_score(candidate: &Compound, query: &BTreeMap<String, SearchValue>) -
     )
 }
 
-fn bedrock_candidate(name: &str, query: &BTreeMap<String, SearchValue>) -> Option<BlockState> {
-    let mut names = name.trim().split(':');
-    let block_name = match (names.next()?, names.next(), names.next()) {
-        (name, None, None) => name,
-        (_, Some(name), None) => name,
-        _ => panic!("invalid block name namespace"),
+fn bedrock_candidate(
+    name: &str,
+    query: &BTreeMap<String, SearchValue>,
+) -> Option<(usize, BlockState)> {
+    let names: Vec<_> = name.trim().split(':').collect();
+    let block_name = match names.as_slice() {
+        [name] => *name,
+        [_, name] => *name,
+        _ => panic!("[{}]", names.join(" ")),
     };
     let registry = registry();
     let group = registry.groups.get(block_name)?;
@@ -585,7 +637,7 @@ fn bedrock_candidate(name: &str, query: &BTreeMap<String, SearchValue>) -> Optio
                     }
                 })
         })?;
-    registry.nemc.get(id).cloned()
+    registry.nemc.get(id).cloned().map(|state| (id, state))
 }
 
 fn best_match<'a, T>(candidates: &'a [(Compound, T)], query: &Compound) -> Option<&'a T> {
@@ -672,9 +724,9 @@ fn bedrock_fuzzy_lookup(
     let mut query = BTreeMap::new();
     for (key, value) in properties {
         let value = query_value(value)?;
-        query.insert(key.replace('"', "").replace("minecraft:", ""), value);
+        query.insert(normalized_search_key(key), value);
     }
-    Ok(bedrock_candidate(name, &query))
+    Ok(bedrock_candidate(name, &query).map(|(_, state)| state))
 }
 
 pub fn bedrock(name: &str, properties: Compound) -> BlockState {
@@ -686,6 +738,29 @@ pub fn bedrock(name: &str, properties: Compound) -> BlockState {
             BlockState::air()
         }
     }
+}
+
+fn air_nemc_runtime_id() -> u32 {
+    registry()
+        .nemc
+        .iter()
+        .rposition(BlockState::is_air)
+        .expect("NEMC block table must contain air") as u32
+}
+
+/// Parses a Bedrock state string and returns its NEMC runtime ID and match status.
+pub fn block_name_and_state_str_to_runtime_id(name: &str, state: &str) -> (u32, bool) {
+    let query = match fuzzy_properties_from_string(state) {
+        Ok(query) => query,
+        Err(error) => {
+            println!("{error}");
+            return (air_nemc_runtime_id(), false);
+        }
+    };
+    bedrock_candidate(name, &query).map_or_else(
+        || (air_nemc_runtime_id(), false),
+        |(runtime_id, _)| (runtime_id as u32, true),
+    )
 }
 
 pub(crate) fn bedrock_fuzzy_runtime(name: &str, properties: Compound) -> BlockState {
@@ -873,6 +948,52 @@ mod mapping_diagnostics {
         assert_eq!(
             query_value(&Nbt::Byte(2)).unwrap_err(),
             "as an uint8 in prop, value should be 0 or 1, get 2"
+        );
+    }
+
+    #[test]
+    fn string_state_parser_matches_go_syntax_and_integer_narrowing() {
+        let properties = fuzzy_properties_from_string(
+            "{\"minecraft:upside_down_bit\"=false,weirdo_direction=2,duplicate=0,duplicate=1}",
+        )
+        .unwrap();
+        assert!(matches!(
+            properties.get("upside_down_bit"),
+            Some(SearchValue::Bool(false))
+        ));
+        assert!(matches!(
+            properties.get("weirdo_direction"),
+            Some(SearchValue::Int(2))
+        ));
+        assert!(matches!(
+            properties.get("duplicate"),
+            Some(SearchValue::Int(1))
+        ));
+
+        let numbers = fuzzy_properties_from_string(
+            "minus_one=-1,wrapped_minus_one=4294967295,wrapped_min=2147483648,overflow=9223372036854775808",
+        )
+        .unwrap();
+        assert!(matches!(
+            numbers.get("minus_one"),
+            Some(SearchValue::Int(-1))
+        ));
+        assert!(matches!(
+            numbers.get("wrapped_minus_one"),
+            Some(SearchValue::Int(-1))
+        ));
+        assert!(matches!(
+            numbers.get("wrapped_min"),
+            Some(SearchValue::Int(i32::MIN))
+        ));
+        assert!(matches!(
+            numbers.get("overflow"),
+            Some(SearchValue::String { number: None, .. })
+        ));
+        assert!(fuzzy_properties_from_string("").unwrap().is_empty());
+        assert_eq!(
+            fuzzy_properties_from_string("facing").unwrap_err(),
+            "prop has no key-value structure: facing"
         );
     }
 }

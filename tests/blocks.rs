@@ -142,131 +142,110 @@ fn bedrock_properties_match_go_fuzzy_runtime_search() {
 }
 
 #[test]
-#[ignore = "Go baseline probe: the matching Rust string-state entry point is not implemented yet"]
-fn block_name_and_state_str_to_runtime_id_go_baseline() {
+fn block_name_and_state_str_to_runtime_id_matches_go() {
     let cases = [
         (
             "exact",
             "minecraft:oak_stairs",
             "upside_down_bit=0b,weirdo_direction=2",
-            BlockState {
-                name: "minecraft:oak_stairs".into(),
-                properties: [
-                    ("upside_down_bit".into(), Nbt::Byte(0)),
-                    ("weirdo_direction".into(), Nbt::Int(2)),
-                ]
-                .into_iter()
-                .collect(),
-            },
+            1247,
+            true,
         ),
         (
             "bool_string",
             "minecraft:oak_stairs",
             "upside_down_bit=false,weirdo_direction=2",
-            BlockState {
-                name: "minecraft:oak_stairs".into(),
-                properties: [
-                    ("upside_down_bit".into(), Nbt::Byte(0)),
-                    ("weirdo_direction".into(), Nbt::Int(2)),
-                ]
-                .into_iter()
-                .collect(),
-            },
+            1247,
+            true,
+        ),
+        (
+            "quoted_key_and_value",
+            "minecraft:oak_stairs",
+            "\"upside_down_bit\"=\"false\",weirdo_direction=\"2\"",
+            1247,
+            true,
+        ),
+        (
+            "minecraft_prefix_colon_syntax",
+            "minecraft:oak_stairs",
+            "minecraft:upside_down_bit:0b,minecraft:weirdo_direction:2",
+            1247,
+            true,
+        ),
+        (
+            "unqualified_block_name",
+            "oak_stairs",
+            "upside_down_bit=0b,weirdo_direction=2",
+            1247,
+            true,
         ),
         (
             "bool_nonzero_int",
             "minecraft:oak_stairs",
             "upside_down_bit=2,weirdo_direction=2",
-            BlockState {
-                name: "minecraft:oak_stairs".into(),
-                properties: [
-                    ("upside_down_bit".into(), Nbt::Byte(1)),
-                    ("weirdo_direction".into(), Nbt::Int(2)),
-                ]
-                .into_iter()
-                .collect(),
-            },
+            1251,
+            true,
         ),
         (
             "extra_property",
             "minecraft:oak_stairs",
             "upside_down_bit=0b,weirdo_direction=2,extra=1",
-            BlockState {
-                name: "minecraft:oak_stairs".into(),
-                properties: [
-                    ("upside_down_bit".into(), Nbt::Byte(0)),
-                    ("weirdo_direction".into(), Nbt::Int(2)),
-                ]
-                .into_iter()
-                .collect(),
-            },
+            1247,
+            true,
         ),
         (
             "unknown_value",
             "minecraft:oak_stairs",
             "upside_down_bit=0b,weirdo_direction=unknown",
-            BlockState {
-                name: "minecraft:oak_stairs".into(),
-                properties: [
-                    ("upside_down_bit".into(), Nbt::Byte(0)),
-                    ("weirdo_direction".into(), Nbt::Int(0)),
-                ]
-                .into_iter()
-                .collect(),
-            },
+            1245,
+            true,
         ),
         (
             "duplicate_last_wins",
             "minecraft:oak_stairs",
             "upside_down_bit=0b,upside_down_bit=1b,weirdo_direction=2",
-            BlockState {
-                name: "minecraft:oak_stairs".into(),
-                properties: [
-                    ("upside_down_bit".into(), Nbt::Byte(1)),
-                    ("weirdo_direction".into(), Nbt::Int(2)),
-                ]
-                .into_iter()
-                .collect(),
-            },
+            1251,
+            true,
         ),
-        (
-            "empty_state",
-            "minecraft:oak_stairs",
-            "",
-            BlockState {
-                name: "minecraft:oak_stairs".into(),
-                properties: [
-                    ("upside_down_bit".into(), Nbt::Byte(0)),
-                    ("weirdo_direction".into(), Nbt::Int(0)),
-                ]
-                .into_iter()
-                .collect(),
-            },
-        ),
+        ("empty_state", "minecraft:oak_stairs", "", 1245, true),
         (
             "malformed_state",
             "minecraft:oak_stairs",
             "facing",
-            BlockState::air(),
+            11982,
+            false,
         ),
         (
             "unknown_name",
             "minecraft:not_a_real_block",
             "",
-            BlockState::air(),
+            11982,
+            false,
         ),
     ];
-    let mismatches: Vec<_> = cases
-        .iter()
-        .filter_map(|(label, name, state, expected)| {
-            let actual = blocks::java(&format!("{name}[{state}]"));
-            (actual != *expected)
-                .then(|| format!("{label}: actual={actual:?}, expected={expected:?}"))
-        })
-        .collect();
-    assert!(
-        mismatches.is_empty(),
-        "Go baseline mismatches:\n{}",
-        mismatches.join("\n")
+    for (label, name, state, expected_id, expected_found) in cases {
+        assert_eq!(
+            blocks::block_name_and_state_str_to_runtime_id(name, state),
+            (expected_id, expected_found),
+            "{label}"
+        );
+    }
+}
+
+#[test]
+fn block_name_and_state_str_invalid_namespace_panics_like_go() {
+    let result = std::panic::catch_unwind(|| {
+        blocks::block_name_and_state_str_to_runtime_id("one:two:three", "")
+    });
+    let payload = result.expect_err("a block name with multiple namespace separators must panic");
+    let message = payload
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| payload.downcast_ref::<&str>().copied())
+        .expect("panic payload must be printable text");
+    assert_eq!(message, "[one two three]");
+    assert_eq!(
+        blocks::block_name_and_state_str_to_runtime_id("one:two:three", "facing"),
+        (11982, false)
     );
 }
