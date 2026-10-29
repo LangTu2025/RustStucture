@@ -32,6 +32,28 @@ fn object_skips_unselected_nested_values() {
 }
 
 #[test]
+fn json_reader_stream_object_go_case_baseline() {
+    let input = br#"{"width":10,"height":20,"blocks":[1,true,null],"meta":{"name":"demo"},"ignored":{"nested":[42]}}"#;
+    let mut selected = Vec::new();
+    json_stream::visit_object(
+        input.as_slice(),
+        |key| matches!(key, "width" | "height" | "blocks" | "meta"),
+        |key, value| {
+            selected.push((key, value));
+            Ok(())
+        },
+    )
+    .unwrap();
+
+    let fields: std::collections::BTreeMap<_, _> = selected.into_iter().collect();
+    assert_eq!(fields["width"], Value::from(10));
+    assert_eq!(fields["height"], Value::from(20));
+    assert_eq!(fields["blocks"], serde_json::json!([1, true, null]));
+    assert_eq!(fields["meta"]["name"], "demo");
+    assert_eq!(fields.len(), 4);
+}
+
+#[test]
 fn json_reader_read_values_maps_objects_arrays_booleans_null_and_strings() {
     let input = br#"[{"a":1},["x",2],true,null,"str"]"#;
     let mut values = Vec::new();
